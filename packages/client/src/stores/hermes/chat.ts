@@ -2751,6 +2751,13 @@ export const useChatStore = defineStore('chat', () => {
 
 function promoteQueuedMessage(sessionId: string, messageId: string) {
     if (!(queuedUserMessages.value.get(sessionId) || []).some(message => message.id === messageId)) return
+    // [user-controlled patch] 立即发送:先在本地乐观移除该条排队消息(UI 立即反馈,
+    // 不用等服务端 interrupt 同步完成后才清队列),再 emit run.promote。
+    // 服务端 promote 成功后会在出队/打断完成时 emit run.queued(dequeued_queue_id)
+    // 权威队列,前端收到后 replace 保持最终一致;若 promote miss,服务端会回
+    // 权威队列,前端 replace 恢复显示,不会丢消息。
+    dropQueuedUserMessage(sessionId, messageId)
+    markDequeuedQueueId(sessionId, messageId)
     getChatRunSocket(runtimeTransport())?.emit('run.promote', {
       session_id: sessionId,
       queue_id: messageId,

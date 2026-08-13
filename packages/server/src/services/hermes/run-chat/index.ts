@@ -593,6 +593,15 @@ export class ChatRunSocket {
       const targetIndex = state.queue.findIndex(item => item.queue_id === data.queue_id)
       if (targetIndex === -1) {
         logger.info('[chat-run-socket] promote miss %s for session %s (queue: %d)', data.queue_id, data.session_id, state.queue.length)
+        // [user-controlled patch] promote miss 时也回传权威队列,让前端乐观移除
+        // 能与服务端最终一致(前端已本地移除,若服务端队列里没有该消息则无需恢复,
+        // 若存在则靠 replace 恢复显示)。
+        this.nsp.to(`session:${data.session_id}`).emit('run.queued', {
+          event: 'run.queued',
+          session_id: data.session_id,
+          queue_length: state.queue.length,
+          queued_messages: this.serializeQueuedMessages(state.queue),
+        })
         return
       }
       const [target] = state.queue.splice(targetIndex, 1)
