@@ -1258,6 +1258,11 @@ export const useChatStore = defineStore('chat', () => {
   const queueInsertionStates = ref<Map<string, QueueInsertionState>>(new Map())
   /** sessionId → queue ids that server reported as dequeued before the peer message arrived */
   const dequeuedQueueIds = ref<Map<string, Set<string>>>(new Map())
+
+  // [user-controlled patch] promote/立即发送时被乐观移除的排队消息快照:
+  // 服务端确认出队(dequeued_queue_id 回传)后,若本地队列已无该条(乐观移除),
+  // 用快照把它恢复显示到主消息列表,避免"AI 已收到但聊天窗口看不见消息"。
+  const promotedMessageSnapshots = ref<Map<string, Map<string, Message>>>(new Map())
   /** sessionId → message selected as the reference for the next user turn */
   const messageReferences = ref<Map<string, MessageReference>>(new Map())
   const activeMessageReference = computed(() => {
@@ -2750,7 +2755,8 @@ export const useChatStore = defineStore('chat', () => {
   }
 
 function promoteQueuedMessage(sessionId: string, messageId: string) {
-    if (!(queuedUserMessages.value.get(sessionId) || []).some(message => message.id === messageId)) return
+    const target = (queuedUserMessages.value.get(sessionId) || []).find(message => message.id === messageId)
+    if (!target) return
     // [user-controlled patch] 立即发送:先在本地乐观移除该条排队消息(UI 立即反馈,
     // 不用等服务端 interrupt 同步完成后才清队列),再 emit run.promote。
     // 服务端 promote 成功后会在出队/打断完成时 emit run.queued(dequeued_queue_id)
@@ -2758,6 +2764,11 @@ function promoteQueuedMessage(sessionId: string, messageId: string) {
     // 权威队列,前端 replace 恢复显示,不会丢消息。
     dropQueuedUserMessage(sessionId, messageId)
     markDequeuedQueueId(sessionId, messageId)
+    const snap = new Map(promotedMessageSnapshots.value)
+    const per = snap.get(sessionId) || new Map()
+    per.set(messageId, { ...target, queued: false })
+    snap.set(sessionId, per)
+    promotedMessageSnapshots.value = snap
     getChatRunSocket(runtimeTransport())?.emit('run.promote', {
       session_id: sessionId,
       queue_id: messageId,
@@ -2890,6 +2901,23 @@ function promoteQueuedMessage(sessionId: string, messageId: string) {
               // run.started 把它当新排队消息再加回来。
               dropQueuedUserMessage(sessionId, dequeuedId)
               markDequeuedQueueId(sessionId, dequeuedId)
+              // [user-controlled patch] promote 乐观移除导致本地队列找不到该条时,
+              // 用 promote 时保存的快照把这条"已发出的消息"恢复显示到主列表,否则
+              // AI 已接收执行但聊天窗口看不见该条消息。快照消费后清除,避免占内存。
+              const restored = (promotedMessageSnapshots.value.get(sessionId) || new Map()).get(dequeuedId)
+              if (restored && !getSessionMsgs(sessionId).some(message => message.id === dequeuedId)) {
+                addMessage(sessionId, { ...restored, queued: false })
+                updateSessionTitle(sessionId)
+              }
+              const sv = promotedMessageSnapshots.value
+              if (sv.has(sessionId)) {
+                const per = new Map(sv.get(sessionId) || new Map())
+                per.delete(dequeuedId)
+                const nv = new Map(sv)
+                if (per.size > 0) nv.set(sessionId, per)
+                else nv.delete(sessionId)
+                promotedMessageSnapshots.value = nv
+              }
             }
       return
     }
