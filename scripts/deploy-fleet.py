@@ -42,15 +42,11 @@ NODES = {
     },
     "36": {
         "host": "192.168.9.36",
-        "user": "ubuntu",
+        "user": "root",
         "password": "admin",
         "deploy_path": "/home/ubuntu/.local/npm-global/lib/node_modules/hermes-web-ui",
-        "restart_cmd": (
-            "pkill -f 'dist/server/index.js' 2>/dev/null; sleep 1; "
-            "export PATH=\"$HOME/.local/node/bin:$HOME/.local/npm-global/bin:$PATH\"; "
-            "nohup node $HOME/.local/npm-global/lib/node_modules/hermes-web-ui/dist/server/index.js "
-            "> $HOME/hermes-web-ui.log 2>&1 &"
-        ),
+        "restart_cmd": "systemctl restart hermes-web-ui",
+        "deploy_user": "ubuntu",
         "label": "36号",
     },
     "61": {
@@ -117,10 +113,14 @@ def deploy_to_node(node_key, dist_dir):
 
         # 解压部署
         print(f"  解压到 {deploy_path}")
+        deploy_user = node.get("deploy_user")
+        chown = f"chown -R {deploy_user}:{deploy_user} {deploy_path}/dist 2>/dev/null; " if deploy_user else ""
         cmd = (
-            f"rm -rf {deploy_path}/dist/* 2>/dev/null; "
-            f"mkdir -p {deploy_path}/dist; "
-            f"tar xzf {remote_tar} -C {deploy_path}/dist/; "
+            f"rm -rf {deploy_path}/dist.new 2>/dev/null; "
+            f"mkdir -p {deploy_path}/dist.new; "
+            f"tar xzf {remote_tar} -C {deploy_path}/dist.new/; "
+            f"{chown}"
+            f"rm -rf {deploy_path}/dist && mv {deploy_path}/dist.new {deploy_path}/dist; "
             f"rm -f {remote_tar}"
         )
         _, stdout, stderr = ssh.exec_command(cmd, timeout=60)
