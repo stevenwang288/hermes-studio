@@ -21,10 +21,11 @@ export type ContentBlock = ContentBlockImport
 export const LIVE_CHAT_MESSAGE_PAGE_SIZE = 150
 export const LIVE_CHAT_MAX_LOADED_MESSAGES = 300
 const LEGACY_WORKSPACE_RUN_CHANGE_MESSAGE_PREFIX = 'workspace-run-change:'
-type ChatAgentId = 'hermes' | 'claude' | 'codex' | 'ekko-agent'
+type ChatAgentId = 'hermes' | 'claude' | 'codex' | 'pi' | 'ekko-agent'
 
 function agentToCodingAgentId(agent?: string): ChatCodingAgentId | undefined {
   if (agent === 'codex') return 'codex'
+  if (agent === 'pi') return 'pi'
   if (agent === 'claude') return 'claude-code'
   if (agent === 'ekko-agent') return 'ekko-agent'
   return undefined
@@ -32,6 +33,7 @@ function agentToCodingAgentId(agent?: string): ChatCodingAgentId | undefined {
 
 function codingAgentIdToAgent(id?: ChatCodingAgentId): ChatAgentId | undefined {
   if (id === 'codex') return 'codex'
+  if (id === 'pi') return 'pi'
   if (id === 'claude-code') return 'claude'
   if (id === 'ekko-agent') return 'ekko-agent'
   return undefined
@@ -409,6 +411,8 @@ export interface PendingClarify {
   clarifyId: string
   question: string
   choices: string[] | null
+  initialResponse: string
+  responseMode: string
   timeoutMs: number
   requestedAt: number
 }
@@ -3006,6 +3010,8 @@ function promoteQueuedMessage(sessionId: string, messageId: string) {
       clarifyId,
       question: String((evt as any).question || ''),
       choices: Array.isArray((evt as any).choices) ? (evt as any).choices : null,
+      initialResponse: String((evt as any).initial_response || ''),
+      responseMode: String((evt as any).response_mode || ''),
       timeoutMs: Number((evt as any).timeout_ms) || 300000,
       requestedAt: Date.now(),
     })
@@ -3139,6 +3145,9 @@ function promoteQueuedMessage(sessionId: string, messageId: string) {
     }
     if (codingAgentId === 'claude-code') {
       return { icon: '/coding-agents/claude-code.svg' }
+    }
+    if (codingAgentId === 'pi') {
+      return { icon: '/coding-agents/pi.svg' }
     }
     if (codingAgentId === 'ekko-agent') {
       return { icon: '/coding-agents/ekko-agent.png' }
@@ -4074,6 +4083,7 @@ function promoteQueuedMessage(sessionId: string, messageId: string) {
             }
 
             case 'run.failed': {
+              clearPendingInteractions(sid)
               const failedMessages = getSessionMsgs(sid)
               const failedAssistant = activeAssistantMessageId
                 ? failedMessages.find(message => message.id === activeAssistantMessageId)
@@ -4779,6 +4789,7 @@ function promoteQueuedMessage(sessionId: string, messageId: string) {
         }
 
         case 'run.failed': {
+          clearPendingInteractions(sid)
           const failedMessages = getSessionMsgs(sid)
           const failedAssistant = activeAssistantMessageId
             ? failedMessages.find(message => message.id === activeAssistantMessageId)

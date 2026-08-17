@@ -19,13 +19,14 @@ import {
 } from '@/api/hermes/group-chat-agent-link'
 import GroupMessageList from './GroupMessageList.vue'
 import GroupChatInput from './GroupChatInput.vue'
+import GroupRoomAgentAvatar from './GroupRoomAgentAvatar.vue'
+import MessageQueueFloatPanel from '@/components/hermes/chat/MessageQueueFloatPanel.vue'
 import FolderPicker from '@/components/hermes/chat/FolderPicker.vue'
 import ProfileAvatar from '@/components/hermes/profiles/ProfileAvatar.vue'
 import PageSidebarNav from '@/components/layout/PageSidebarNav.vue'
-import SettingsCircuitBadge from '@/components/layout/SettingsCircuitBadge.vue'
 import { copyToClipboard } from '@/utils/clipboard'
 import type { Attachment } from '@/stores/hermes/chat'
-import type { GroupChatMention, MemberInfo, RoomAgent, RoomAgentHandoffChain, RoomInfo, RoomSummaryAnchor, RoomSummaryConfig, RoomSummaryState } from '@/api/hermes/group-chat'
+import type { GroupChatMention, MemberInfo, RoomAgent, RoomInfo, RoomSummaryAnchor, RoomSummaryConfig, RoomSummaryState } from '@/api/hermes/group-chat'
 import { useFilesStore } from '@/stores/hermes/files'
 import { useToolPanelStore } from '@/stores/hermes/tool-panel'
 import { hasDesktopBrowserBridge } from '@/utils/desktop-bridge'
@@ -44,6 +45,7 @@ import {
 } from '@/utils/group-agent-avatar'
 import { generateGroupChatInviteCode } from '@/utils/group-chat-invite-code'
 import { buildRemoteGroupChatRooms, type RemoteGroupChatRoom } from '@/utils/group-chat-remote-rooms'
+import { handoffErrorTranslationKey } from './handoff-presentation'
 
 const FilesPanel = defineAsyncComponent(async () => (await import('@/components/hermes/chat/FilesPanel.vue')).default)
 const FilePreview = defineAsyncComponent(async () => (await import('@/components/hermes/files/FilePreview.vue')).default)
@@ -101,9 +103,6 @@ const agentHandoffEnabledDraft = ref(true)
 const agentHandoffMaxDepthDraft = ref<number | null>(4)
 const agentHandoffUnlimitedDraft = ref(false)
 const agentHandoffRecommendation = computed(() => Math.max(4, store.agents.length + 1))
-const stoppedHandoffChains = computed<RoomAgentHandoffChain[]>(() =>
-    [...store.handoffChains.values()].filter(chain => chain.roomId === store.currentRoomId)
-)
 const isContinuingHandoff = ref(false)
 const roomSummaryState = ref<RoomSummaryState | null>(null)
 const roomSummaryAnchor = ref<RoomSummaryAnchor | null>(null)
@@ -187,13 +186,14 @@ const profileOptions = computed(() =>
     profilesStore.profiles.map(p => ({ label: p.name, value: p.name }))
 )
 
-type GroupAgentType = 'hermes' | 'ekko' | 'codex' | 'claude'
+type GroupAgentType = 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi'
 
 const groupAgentTypeOptions = computed<Array<{ label: string; value: GroupAgentType }>>(() => [
     { label: 'Hermes', value: 'hermes' },
-    { label: 'Claude Code', value: 'claude' },
+    { label: 'Ekko', value: 'ekko' },
+    { label: 'Claude', value: 'claude' },
     { label: 'Codex', value: 'codex' },
-    { label: 'Ekko Agent', value: 'ekko' },
+    { label: 'Pi', value: 'pi' },
 ])
 
 function getAgentModelGroups(profile: string) {
@@ -205,7 +205,9 @@ function getAgentModelGroups(profile: string) {
                 ? 'ekko-agent'
                 : selectedAgentType.value === 'claude'
                     ? 'claude-code'
-                    : 'codex'
+                    : selectedAgentType.value === 'pi'
+                        ? 'pi'
+                        : 'codex'
             return canScopedCodingAgentUseProvider(codingAgentId, group.provider)
         })
 }
@@ -528,6 +530,10 @@ const visibleClarify = computed(() =>
     currentRoomCanManage.value && pendingAgentPairings.value.length === 0
         ? store.activePendingClarify
         : null,
+)
+watch(
+    () => visibleClarify.value?.clarifyId,
+    () => { clarifyResponse.value = visibleClarify.value?.initialResponse || '' },
 )
 const visibleAgentPairing = computed(() =>
     currentRoomCanManage.value ? pendingAgentPairings.value[0] || null : null,
@@ -1096,6 +1102,14 @@ async function handleSendMessage(content: string, attachments?: Attachment[], me
     }
 }
 
+async function handleCancelQueuedExecution(queueId: string) {
+    try {
+        await store.cancelExecutionQueueItem(queueId)
+    } catch (err: any) {
+        message.error(err?.message || t('groupChat.executionQueueCancelFailed'))
+    }
+}
+
 async function handleSummaryConfigurationRequired() {
     if (!currentRoomCanManage.value) {
         message.warning(t('groupChat.summaryConfigurationOwnerRequired'))
@@ -1587,15 +1601,25 @@ async function handleSaveSummaryConfig() {
 }
 
 async function handleSaveHandoffConfig() {
-    if (!store.currentRoomId || !currentRoomCanManage.value) return
+    const roomId = store.currentRoomId
+    if (!roomId || !currentRoomCanManage.value) return
     try {
-        const res = await updateRoomConfig(store.currentRoomId, {
+        const res = await updateRoomConfig(roomId, {
             agentHandoffEnabled: agentHandoffEnabledDraft.value,
             agentHandoffMaxDepth: agentHandoffMaxDepthDraft.value,
             agentHandoffUnlimited: agentHandoffUnlimitedDraft.value,
         })
-        const idx = store.rooms.findIndex(r => r.id === store.currentRoomId)
+        const idx = store.rooms.findIndex(r => r.id === roomId)
         if (idx >= 0 && res.room) store.rooms[idx] = res.room
+        try {
+            const result = await listStoppedRoomAgentHandoffs(roomId)
+            if (store.currentRoomId === roomId) {
+                store.handoffChains = new Map(result.chains.map(chain => [chain.chainId, chain]))
+            }
+        } catch {
+            // Never preserve controls that may have become invalid under the saved policy.
+            if (store.currentRoomId === roomId) store.handoffChains = new Map()
+        }
         message.success(t('common.saved'))
     } catch (err: any) {
         message.error(err?.message || t('common.saveFailed'))
@@ -1617,7 +1641,7 @@ async function handleContinueHandoff(chainId: string): Promise<void> {
         } catch {
             // Keep the original continuation error.
         }
-        message.error(err?.message || t('common.saveFailed'))
+        message.error(t(handoffErrorTranslationKey(err?.message) || 'groupChat.agentHandoffErrorGeneric'))
     } finally {
         isContinuingHandoff.value = false
     }
@@ -1678,14 +1702,24 @@ async function handleApproval(choice: 'once' | 'session' | 'always' | 'deny') {
 
 async function handleClarify(response?: string) {
     if (!currentRoomCanManage.value) return
-    const finalResponse = response !== undefined ? response : clarifyResponse.value.trim()
-    if (response === undefined && !finalResponse) return
+    const finalResponse = response !== undefined
+        ? response
+        : visibleClarify.value?.responseMode === 'editor'
+            ? clarifyResponse.value
+            : clarifyResponse.value.trim()
+    if (response === undefined && !finalResponse && visibleClarify.value?.responseMode !== 'editor') return
     try {
         await store.respondClarify(finalResponse)
         clarifyResponse.value = ''
     } catch (err: any) {
         message.error(err.message || t('common.saveFailed'))
     }
+}
+
+function handleClarifyKeydown(event: KeyboardEvent) {
+    if (visibleClarify.value?.responseMode === 'editor') return
+    event.preventDefault()
+    void handleClarify()
 }
 
 </script>
@@ -1725,9 +1759,11 @@ async function handleClarify(response?: string) {
                             @click="handleSelectRoom(room.id)"
                             @contextmenu="handleRoomContextMenu($event, room.id)"
                         >
-                            <svg class="room-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                            </svg>
+                            <GroupRoomAgentAvatar
+                                :agents="store.roomAgentsForRoom(room.id)"
+                                :active-agent-ids="store.activeAgentIdsForRoom(room.id)"
+                                :label="room.name || room.id"
+                            />
                             <div class="room-info">
                                 <span class="room-name">{{ room.name || room.id }}</span>
                                 <span v-if="room.inviteCode" class="room-code">{{ room.inviteCode }}</span>
@@ -1794,7 +1830,6 @@ async function handleClarify(response?: string) {
                     </svg>
                     <span>{{ t('sidebar.settings') }}</span>
                 </button>
-                <SettingsCircuitBadge />
             </div>
         </div>
 
@@ -1972,7 +2007,7 @@ async function handleClarify(response?: string) {
                             <template #trigger>
                                 <button
                                     type="button"
-                                    class="agent-avatar-rail-item"
+                                    class="agent-avatar-rail-item agent-avatar-rail-agent"
                                     :class="{
                                         'agent-avatar-rail-active': !!agentContextStatus(agent),
                                         'agent-avatar-rail-offline': agent.connectionStatus === 'offline',
@@ -2049,6 +2084,7 @@ async function handleClarify(response?: string) {
                     <div class="group-message-shell">
                         <GroupMessageList
                             :allow-speech="!props.standalone"
+                            :can-manage-handoff="currentRoomCanManage"
                             @mention-agent="handleMentionAgent"
                             @continue-handoff="handleContinueHandoff"
                             @adjust-handoff-settings="handleOpenRoomSettings"
@@ -2151,8 +2187,8 @@ async function handleClarify(response?: string) {
                                     </NButton>
                                 </div>
                                 <div class="clarify-float-input-row">
-                                    <NInput v-model:value="clarifyResponse" size="small" :placeholder="t('chat.clarifyPlaceholder')" @keydown.enter.prevent="handleClarify()" />
-                                    <NButton size="small" type="primary" :disabled="!clarifyResponse.trim()" @click="handleClarify()">
+                                    <NInput v-model:value="clarifyResponse" size="small" :type="visibleClarify.responseMode === 'editor' ? 'textarea' : 'text'" :placeholder="t('chat.clarifyPlaceholder')" @keydown.enter="handleClarifyKeydown" />
+                                    <NButton size="small" type="primary" :disabled="visibleClarify.responseMode !== 'editor' && !clarifyResponse.trim()" @click="handleClarify()">
                                         {{ t('chat.clarifySubmit') }}
                                     </NButton>
                                 </div>
@@ -2208,6 +2244,19 @@ async function handleClarify(response?: string) {
                             </span>
                         </div>
                     </Transition>
+                    <div v-if="store.executionQueue.length > 0" class="group-execution-queue-float-stack">
+                        <MessageQueueFloatPanel
+                            :items="store.executionQueue.map(item => ({
+                                id: item.id,
+                                text: item.textSummary,
+                                secondary: item.targetAgentName,
+                                position: item.position,
+                            }))"
+                            test-id="group-execution-queue"
+                            :remove-title="item => t('groupChat.executionQueueCancel', { agent: item.secondary || '' })"
+                            @remove="handleCancelQueuedExecution"
+                        />
+                    </div>
                     <GroupChatInput
                         ref="groupChatInputRef"
                         :send-blocked="currentRoomNeedsSummaryConfiguration"
@@ -2867,23 +2916,6 @@ async function handleClarify(response?: string) {
                                 <NSwitch v-model:value="agentHandoffUnlimitedDraft" :disabled="!agentHandoffEnabledDraft" />
                             </div>
                             <NButton type="primary" @click="handleSaveHandoffConfig">{{ t('common.save') }}</NButton>
-                            <div v-for="chain in stoppedHandoffChains" :key="chain.chainId" class="form-hint">
-                                <div>{{ t('groupChat.agentHandoffStopped') }}</div>
-                                <div>{{ t('groupChat.agentHandoffDepthState', { current: chain.currentDepth, max: chain.unlimited ? '∞' : chain.maxDepth }) }}</div>
-                                <div>{{ t('groupChat.agentHandoffTarget', { target: chain.targetAgentId || '—' }) }}</div>
-                                <div>{{ t('groupChat.agentHandoffReason', { reason: chain.stopReason || '—' }) }}</div>
-                                <div>{{ t('groupChat.agentHandoffContinueState', { state: chain.continueUsed ? 'used' : 'available', updated: formatSummaryTime(chain.updatedAt) }) }}</div>
-                                <div v-if="chain.lastError" class="summary-error">{{ chain.lastError }}</div>
-                                <NButton
-                                    v-if="chain.status === 'stopped' && !chain.continueUsed"
-                                    text
-                                    type="primary"
-                                    :loading="isContinuingHandoff"
-                                    @click="handleContinueHandoff(chain.chainId)"
-                                >
-                                    {{ t('groupChat.agentHandoffContinue') }}
-                                </NButton>
-                            </div>
                         </section>
                     <section class="settings-section summary-state-section">
                         <div class="summary-state-heading">
@@ -2964,6 +2996,15 @@ export default defineComponent({ components: { CreateRoomForm } })
     min-width: 0;
     max-width: 100%;
     background-color: $bg-card;
+}
+
+.group-execution-queue-float-stack {
+    position: absolute;
+    right: 16px;
+    bottom: 82px;
+    z-index: 8;
+    width: min(380px, calc(100% - 32px));
+    pointer-events: none;
 }
 
 .sidebar-backdrop {
@@ -3552,6 +3593,11 @@ export default defineComponent({ components: { CreateRoomForm } })
         width: 32px;
         height: 32px;
     }
+}
+
+.agent-avatar-rail-agent .agent-avatar {
+    box-sizing: border-box;
+    border: 1px solid #fff;
 }
 
 .agent-owner-avatar-badge {

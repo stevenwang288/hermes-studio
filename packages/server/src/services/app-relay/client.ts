@@ -1,6 +1,12 @@
 import { randomUUID } from 'crypto'
 import { io, type Socket } from 'socket.io-client'
 import { config } from '../../config'
+import {
+  assignLegacyCloudAppConnectionUser,
+  listAppConnections,
+  listPendingCloudAppConnectionRevocations,
+  markCloudAppConnectionRevocationSynced,
+} from '../../db/hermes/app-connections-store'
 import { logger } from '../logger'
 import { createDeviceSignature } from '../system-info'
 
@@ -21,7 +27,7 @@ const ALLOWED_REQUEST_HEADERS = new Set([
   'x-hermes-profile',
   'x-request-id',
 ])
-const ALLOWED_SOCKET_NAMESPACES = new Set(['/chat-run', '/group-chat'])
+const ALLOWED_SOCKET_NAMESPACES = new Set(['/chat-run', '/group-chat', '/workflow'])
 const ALLOWED_CHAT_RUN_CLIENT_EVENTS = new Set([
   'run',
   'resume',
@@ -44,6 +50,11 @@ const ALLOWED_GROUP_CHAT_CLIENT_EVENTS = new Set([
   'approval.respond',
   'clarify.respond',
 ])
+const ALLOWED_WORKFLOW_CLIENT_EVENTS = new Set([
+  'workflows.list',
+  'workflow.status.subscribe',
+  'workflow.status.unsubscribe',
+])
 const TEXTUAL_RESPONSE_TYPES = [
   'application/json',
   'application/problem+json',
@@ -60,6 +71,15 @@ const NON_STREAMING_SUPPRESSED_EVENTS = new Set([
   'thinking.delta',
   'reasoning.available',
 ])
+
+function normalizeCloudUserId(value: unknown): number {
+  const userId = Number(value)
+  return Number.isSafeInteger(userId) && userId > 0 ? userId : 0
+}
+
+function cloudConnectionKey(deviceCode: string, cloudUserId: number): string {
+  return `${deviceCode}\u0000${cloudUserId}`
+}
 
 export interface AppRelayHttpRequest {
   id?: string
@@ -124,6 +144,18 @@ export interface StartAppRelayClientOptions {
   fetchImpl?: typeof fetch
 }
 
+export interface CloudAppPreconnection {
+  type: 'hermes-studio.app-connection'
+  version: 1
+  connectionType: 'cloud'
+  machineId: string
+  preconnectId: string
+  matchingCode: string
+  expiresAt: number
+  hardExpiresAt: number
+  refreshRemaining: number
+}
+
 interface LocalSocketBridge {
   id: string
   namespace: string
@@ -146,6 +178,13 @@ export class AppRelayClient {
   private readonly fetchImpl: typeof fetch
   private pairingCode = ''
   private pairingExpiresAt = 0
+  private readonly pendingPreconnections = new Map<string, {
+    authorizationCode: string
+    createdByUserId: number
+    preconnection: CloudAppPreconnection
+  }>()
+  private readonly cloudConnectionOnline = new Map<string, boolean>()
+  private preconnectionExpired = false
 
   constructor(private readonly options: Required<Omit<StartAppRelayClientOptions, 'connectionId' | 'machineInfo'>> & {
     machineInfo?: Record<string, unknown>
@@ -182,6 +221,7 @@ export class AppRelayClient {
     })
 
     this.socket.on('connect', () => {
+      this.preconnectionExpired = false
       logger.info({ relayUrl: this.redactedRelayUrl(), machineId: this.options.machineId }, '[app-relay] connected')
     })
     this.socket.on('connect_error', (err: Error) => {
@@ -194,6 +234,33 @@ export class AppRelayClient {
     this.socket.on('relay.replaced', () => this.stop())
     this.socket.on('relay.ready', (payload: Record<string, unknown> = {}) => {
       this.rememberPairing(payload)
+    })
+    this.socket.on('connection.authorize', (
+      request: Record<string, unknown> = {},
+      ack?: (response: Record<string, unknown>) => void,
+    ) => {
+      void this.authorizeCloudConnection(request).then(response => ack?.(response))
+    })
+    this.socket.on('connection.activated', (payload: Record<string, unknown> = {}) => {
+      const preconnectId = String(payload.preconnectId || payload.preconnect_id || '').trim()
+      if (preconnectId) this.pendingPreconnections.delete(preconnectId)
+    })
+    this.socket.on('connection.snapshot', (payload: Record<string, unknown> = {}) => {
+      this.rememberConnectionSnapshot(payload)
+      void this.reconcileConnectionSnapshot(payload)
+    })
+    this.socket.on('connection.status', (payload: Record<string, unknown> = {}) => {
+      const deviceCode = String(payload.deviceCode || payload.device_code || '').trim()
+      const cloudUserId = normalizeCloudUserId(
+        payload.appUserId || payload.app_user_id || payload.userId || payload.user_id,
+      )
+      if (deviceCode && cloudUserId) {
+        this.cloudConnectionOnline.set(cloudConnectionKey(deviceCode, cloudUserId), Boolean(payload.online))
+      }
+    })
+    this.socket.on('relay.preconnect.expired', () => {
+      this.pendingPreconnections.clear()
+      this.preconnectionExpired = true
     })
     this.socket.on('app.http.request', (request: AppRelayHttpRequest, ack?: (response: AppRelayHttpResponse) => void) => {
       void this.handleHttpRequest(request)
@@ -219,6 +286,10 @@ export class AppRelayClient {
 
   isConnected(): boolean {
     return Boolean(this.socket?.connected)
+  }
+
+  isPreconnectionExpired(): boolean {
+    return this.preconnectionExpired
   }
 
   status(): { connected: boolean; machineId: string; pairingCode: string; pairingExpiresAt: number } {
@@ -249,6 +320,83 @@ export class AppRelayClient {
     })
   }
 
+  requestPreconnection(
+    authorizationCode: string,
+    refresh = false,
+    timeoutMs = 8000,
+    createdByUserId = 0,
+  ): Promise<CloudAppPreconnection> {
+    const socket = this.socket
+    if (!socket?.connected) return Promise.reject(new Error('app_relay_not_connected'))
+    return new Promise((resolve, reject) => {
+      socket.timeout(timeoutMs).emit(
+        'preconnect.request',
+        { refresh },
+        (error: Error | null, response: Record<string, unknown> = {}) => {
+          if (error || response.ok === false) {
+            const failure = new Error(String(response.error || error?.message || 'preconnection_request_failed')) as Error & {
+              retryAfter?: number
+              refreshRemaining?: number
+            }
+            failure.retryAfter = Number(response.retryAfter) || undefined
+            failure.refreshRemaining = Number(response.refreshRemaining)
+            reject(failure)
+            return
+          }
+          const preconnection = normalizeCloudPreconnection(response)
+          if (!preconnection) {
+            reject(new Error('preconnection_request_failed'))
+            return
+          }
+          this.pendingPreconnections.set(preconnection.preconnectId, {
+            authorizationCode,
+            createdByUserId,
+            preconnection,
+          })
+          resolve(preconnection)
+        },
+      )
+    })
+  }
+
+  getCachedPreconnection(
+    createdByUserId: number,
+    now = Math.floor(Date.now() / 1000),
+  ): CloudAppPreconnection | null {
+    for (const [preconnectId, pending] of this.pendingPreconnections.entries()) {
+      if (pending.preconnection.hardExpiresAt <= now) {
+        this.pendingPreconnections.delete(preconnectId)
+        continue
+      }
+      if (pending.createdByUserId !== createdByUserId) continue
+      return { ...pending.preconnection }
+    }
+    return null
+  }
+
+  revokeCloudConnection(deviceCode: string, appUserId: number, timeoutMs = 8000): Promise<boolean> {
+    const socket = this.socket
+    const cloudUserId = normalizeCloudUserId(appUserId)
+    if (!socket?.connected || !cloudUserId) return Promise.resolve(false)
+    return new Promise(resolve => {
+      socket.timeout(timeoutMs).emit(
+        'connection.revoke',
+        { deviceCode, appUserId: cloudUserId },
+        (error: Error | null, response: Record<string, unknown> = {}) => {
+          resolve(!error && response.ok === true)
+        },
+      )
+    })
+  }
+
+  isCloudDeviceOnline(deviceCode: string, appUserId: number): boolean {
+    const cloudUserId = normalizeCloudUserId(appUserId)
+    if (cloudUserId) return this.cloudConnectionOnline.get(cloudConnectionKey(deviceCode, cloudUserId)) || false
+    const prefix = `${deviceCode}\u0000`
+    return [...this.cloudConnectionOnline.entries()]
+      .some(([key, online]) => key.startsWith(prefix) && online)
+  }
+
   waitForConnected(timeoutMs = 5000): Promise<boolean> {
     const socket = this.socket
     if (!socket) return Promise.resolve(false)
@@ -257,22 +405,16 @@ export class AppRelayClient {
       const cleanup = () => {
         clearTimeout(timer)
         socket.off('connect', onConnect)
-        socket.off('connect_error', onFailure)
       }
       const onConnect = () => {
         cleanup()
         resolve(true)
-      }
-      const onFailure = () => {
-        cleanup()
-        resolve(false)
       }
       const timer = setTimeout(() => {
         cleanup()
         resolve(false)
       }, timeoutMs)
       socket.once('connect', onConnect)
-      socket.once('connect_error', onFailure)
     })
   }
 
@@ -283,6 +425,10 @@ export class AppRelayClient {
     if (!path) return httpError(request.id, 'path_not_allowed', 'Relay request path is not allowed', 403)
 
     const headers = normalizeHeaders(request.headers)
+    if (method === 'POST' && path === '/api/auth/app-login') {
+      headers.delete('authorization')
+      headers.set('x-hermes-app-connection', 'cloud')
+    }
     const normalizedBody = normalizeRequestBody(request, method, headers)
     if (isHttpErrorResponse(normalizedBody)) return normalizedBody
     if (normalizedBody.contentType) headers.set('content-type', normalizedBody.contentType)
@@ -429,6 +575,135 @@ export class AppRelayClient {
     }
   }
 
+  private async authorizeCloudConnection(request: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const preconnectId = String(request.preconnectId || request.preconnect_id || '').trim()
+    const matchingCode = String(request.matchingCode || request.matching_code || '').trim()
+    const pending = this.pendingPreconnections.get(preconnectId)
+    const cloudUserId = normalizeCloudUserId(
+      request.appUserId || request.app_user_id || request.userId || request.user_id,
+    )
+    if (
+      !pending
+      || pending.preconnection.expiresAt <= Math.floor(Date.now() / 1000)
+      || pending.preconnection.matchingCode !== matchingCode
+    ) return { ok: false, error: 'studio_preconnection_not_found' }
+    if (!cloudUserId) return { ok: false, error: 'app_user_id_required' }
+
+    const response = await this.handleHttpRequest({
+      id: `cloud-login-${preconnectId}`,
+      method: 'POST',
+      path: '/api/auth/app-login',
+      headers: { 'content-type': 'application/json' },
+      body: {
+        authorization_code: pending.authorizationCode,
+        device_code: request.deviceCode || request.device_code,
+        device_name: request.deviceName || request.device_name,
+        device_brand: request.deviceBrand || request.device_brand,
+        device_model: request.deviceModel || request.device_model,
+        cloud_user_id: cloudUserId,
+      },
+    })
+    if (Number(response.status) < 200 || Number(response.status) >= 300 || typeof response.body !== 'string') {
+      return { ok: false, error: response.error?.code || `studio_login_http_${Number(response.status || 0)}` }
+    }
+    try {
+      const body = JSON.parse(response.body) as Record<string, any>
+      const appConnection = body.appConnection && typeof body.appConnection === 'object'
+        ? body.appConnection as Record<string, unknown>
+        : {}
+      const token = String(body.token || '').trim()
+      const studioUserId = Number(body.userId)
+      if (!token || !Number.isSafeInteger(studioUserId) || studioUserId <= 0) {
+        return { ok: false, error: 'studio_authorization_invalid' }
+      }
+      return {
+        ok: true,
+        studioUserId,
+        studioToken: token,
+        studioTokenExpiresAt: Number(appConnection.token_expires_at) || 0,
+        profiles: Array.isArray(body.profiles) ? body.profiles : [],
+        machineName: String(this.options.machineInfo?.computer_name || this.options.machineId),
+        machine: this.options.machineInfo || { device_id: this.options.machineId },
+      }
+    } catch {
+      return { ok: false, error: 'studio_authorization_invalid' }
+    }
+  }
+
+  private rememberConnectionSnapshot(payload: Record<string, unknown>): void {
+    this.cloudConnectionOnline.clear()
+    const connections = Array.isArray(payload.connections) ? payload.connections : []
+    for (const item of connections) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+      const connection = item as Record<string, unknown>
+      const deviceCode = String(connection.deviceCode || connection.device_code || '').trim()
+      const cloudUserId = normalizeCloudUserId(
+        connection.appUserId || connection.app_user_id || connection.userId || connection.user_id,
+      )
+      if (deviceCode && cloudUserId) {
+        this.cloudConnectionOnline.set(cloudConnectionKey(deviceCode, cloudUserId), Boolean(connection.online))
+      }
+    }
+  }
+
+  private async reconcileConnectionSnapshot(payload: Record<string, unknown>): Promise<void> {
+    const connections = Array.isArray(payload.connections) ? payload.connections : []
+    const remoteAccountsByDevice = new Map<string, Set<number>>()
+    for (const item of connections) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+      const connection = item as Record<string, unknown>
+      const deviceCode = String(connection.deviceCode || connection.device_code || '').trim()
+      const cloudUserId = normalizeCloudUserId(
+        connection.appUserId || connection.app_user_id || connection.userId || connection.user_id,
+      )
+      if (!deviceCode || !cloudUserId) continue
+      const accounts = remoteAccountsByDevice.get(deviceCode) || new Set<number>()
+      accounts.add(cloudUserId)
+      remoteAccountsByDevice.set(deviceCode, accounts)
+    }
+    for (const [deviceCode, accountIds] of remoteAccountsByDevice) {
+      if (accountIds.size === 1) {
+        assignLegacyCloudAppConnectionUser(deviceCode, [...accountIds][0])
+      }
+    }
+
+    const localConnections = listAppConnections()
+      .filter(connection => connection.connection_type === 'cloud')
+    const localConnectionKeys = new Set(
+      localConnections
+        .filter(connection => connection.cloud_user_id > 0)
+        .map(connection => cloudConnectionKey(connection.device_code, connection.cloud_user_id)),
+    )
+    const legacyDeviceCodes = new Set(
+      localConnections
+        .filter(connection => connection.cloud_user_id === 0)
+        .map(connection => connection.device_code),
+    )
+    const pendingRevocationKeys = new Set(
+      listPendingCloudAppConnectionRevocations()
+        .map(connection => cloudConnectionKey(connection.device_code, connection.cloud_user_id)),
+    )
+    for (const item of connections) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+      const connection = item as Record<string, unknown>
+      const deviceCode = String(connection.deviceCode || connection.device_code || '').trim()
+      const cloudUserId = normalizeCloudUserId(
+        connection.appUserId || connection.app_user_id || connection.userId || connection.user_id,
+      )
+      if (
+        !deviceCode
+        || !cloudUserId
+        || localConnectionKeys.has(cloudConnectionKey(deviceCode, cloudUserId))
+        || legacyDeviceCodes.has(deviceCode)
+        || !pendingRevocationKeys.has(cloudConnectionKey(deviceCode, cloudUserId))
+      ) continue
+      if (await this.revokeCloudConnection(deviceCode, cloudUserId)) {
+        markCloudAppConnectionRevocationSynced(deviceCode, cloudUserId)
+        this.cloudConnectionOnline.delete(cloudConnectionKey(deviceCode, cloudUserId))
+      }
+    }
+  }
+
   private rememberPairing(payload: Record<string, unknown>): void {
     const pairingCode = typeof payload.pairingCode === 'string' ? payload.pairingCode.trim() : ''
     const expiresAt = Number(payload.expiresAt)
@@ -488,6 +763,39 @@ function resolveAppRelayUrl(input: string): string {
   if (!path) url.pathname = APP_RELAY_NAMESPACE
   else if (path !== APP_RELAY_NAMESPACE && !path.endsWith(APP_RELAY_NAMESPACE)) url.pathname = `${path}${APP_RELAY_NAMESPACE}`
   return url.toString()
+}
+
+function normalizeCloudPreconnection(value: Record<string, unknown>): CloudAppPreconnection | null {
+  const type = String(value.type || '')
+  const version = Number(value.version)
+  const connectionType = String(value.connectionType || value.connection_type || '')
+  const machineId = String(value.machineId || value.machine_id || '').trim()
+  const preconnectId = String(value.preconnectId || value.preconnect_id || '').trim()
+  const matchingCode = String(value.matchingCode || value.matching_code || '').trim()
+  const expiresAt = Number(value.expiresAt || value.expires_at)
+  const hardExpiresAt = Number(value.hardExpiresAt || value.hard_expires_at)
+  const refreshRemaining = Number(value.refreshRemaining ?? value.refresh_remaining)
+  if (
+    type !== 'hermes-studio.app-connection'
+    || version !== 1
+    || connectionType !== 'cloud'
+    || !machineId
+    || !preconnectId
+    || !matchingCode
+    || !Number.isSafeInteger(expiresAt)
+    || !Number.isSafeInteger(hardExpiresAt)
+  ) return null
+  return {
+    type: 'hermes-studio.app-connection',
+    version: 1,
+    connectionType: 'cloud',
+    machineId,
+    preconnectId,
+    matchingCode,
+    expiresAt,
+    hardExpiresAt,
+    refreshRemaining: Number.isSafeInteger(refreshRemaining) ? refreshRemaining : 0,
+  }
 }
 
 function normalizeMethod(value: unknown): string | null {
@@ -602,6 +910,7 @@ function normalizeTimeout(value: unknown): number {
 function isAllowedSocketEvent(namespace: string, event: string): boolean {
   if (namespace === '/chat-run') return ALLOWED_CHAT_RUN_CLIENT_EVENTS.has(event)
   if (namespace === '/group-chat') return ALLOWED_GROUP_CHAT_CLIENT_EVENTS.has(event)
+  if (namespace === '/workflow') return ALLOWED_WORKFLOW_CLIENT_EVENTS.has(event)
   return false
 }
 
