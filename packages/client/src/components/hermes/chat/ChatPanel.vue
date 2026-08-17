@@ -528,13 +528,14 @@ function persistCollapsedCategories() {
   );
 }
 
-function toggleCategoryGroup(key: string) {
-  const next = new Set(collapsedCategories.value);
-  if (next.has(key)) next.delete(key);
-  else next.add(key);
-  collapsedCategories.value = next;
-  persistCollapsedCategories();
-}
+// [fork] 分类分组已隐藏，以下函数不再使用
+// function toggleCategoryGroup(key: string) {
+//   const next = new Set(collapsedCategories.value);
+//   if (next.has(key)) next.delete(key);
+//   else next.add(key);
+//   collapsedCategories.value = next;
+//   persistCollapsedCategories();
+// }
 const profileFilterOptions = computed(() => [
   { label: t("chat.allProfiles"), value: "__all__" },
   ...profilesStore.profiles.map((profile) => ({
@@ -1323,30 +1324,31 @@ const showRenameCategoryModal = ref(false);
 const renameCategoryValue = ref("");
 const showDeleteCategoryModal = ref(false);
 
-function handleCategoryContextMenu(event: MouseEvent, groupKey: string) {
-  if (groupKey === "category-none") return;
-  const categoryId = Number(groupKey.slice("category-".length));
-  if (!Number.isSafeInteger(categoryId)) return;
-  event.preventDefault();
-  event.stopPropagation();
-  showContextMenu.value = false;
-  categoryContextId.value = categoryId;
-  categoryContextMenuX.value = event.clientX;
-  categoryContextMenuY.value = event.clientY;
-  showCategoryContextMenu.value = true;
-}
+// [fork] 分类分组已隐藏，以下函数不再使用
+// function handleCategoryContextMenu(event: MouseEvent, groupKey: string) {
+//   if (groupKey === "category-none") return;
+//   const categoryId = Number(groupKey.slice("category-".length));
+//   if (!Number.isSafeInteger(categoryId)) return;
+//   event.preventDefault();
+//   event.stopPropagation();
+//   showContextMenu.value = false;
+//   categoryContextId.value = categoryId;
+//   categoryContextMenuX.value = event.clientX;
+//   categoryContextMenuY.value = event.clientY;
+//   showCategoryContextMenu.value = true;
+// }
 
-function handleCategoryContextMenuSelect(key: string) {
-  showCategoryContextMenu.value = false;
-  const category = sessionCategories.value.find((item) => item.id === categoryContextId.value);
-  if (!category) return;
-  if (key === "rename") {
-    renameCategoryValue.value = category.name;
-    showRenameCategoryModal.value = true;
-  } else if (key === "delete") {
-    showDeleteCategoryModal.value = true;
-  }
-}
+// function handleCategoryContextMenuSelect(key: string) {
+//   showCategoryContextMenu.value = false;
+//   const category = sessionCategories.value.find((item) => item.id === categoryContextId.value);
+//   if (!category) return;
+//   if (key === "rename") {
+//     renameCategoryValue.value = category.name;
+//     showRenameCategoryModal.value = true;
+//   } else if (key === "delete") {
+//     showDeleteCategoryModal.value = true;
+//   }
+// }
 
 async function handleRenameCategoryConfirm() {
   const categoryId = categoryContextId.value;
@@ -1406,19 +1408,20 @@ const contextMenuOptions = computed(() => {
     options.push({ label: t("chat.setModel"), key: "model" })
   }
 
-  options.push({
-    label: t("chat.moveToCategory"),
-    key: "category",
-    children: [
-      { label: t("chat.uncategorized"), key: "category:none" },
-      ...sessionCategories.value.map((category) => ({
-        label: category.name,
-        key: `category:${category.id}`,
-      })),
-    ],
-  })
+  // [fork] 分类分组已隐藏，移除"移动到分类"菜单项
+  // options.push({
+  //   label: t("chat.moveToCategory"),
+  //   key: "category",
+  //   children: [
+  //     { label: t("chat.uncategorized"), key: "category:none" },
+  //     ...sessionCategories.value.map((category) => ({
+  //       label: category.name,
+  //       key: `category:${category.id}`,
+  //     })),
+  //   ],
+  // })
 
-  options.push({
+    options.push({
     label: t("chat.export"),
     key: "export",
     children: [
@@ -2055,53 +2058,34 @@ async function handleSessionModelCustomSubmit() {
           />
         </template>
 
-        <template v-for="group in categorizedSessions" :key="group.key">
-          <div
-            class="session-group-header"
-            @click="toggleCategoryGroup(group.key)"
-            @contextmenu="handleCategoryContextMenu($event, group.key)"
-          >
-            <svg
-              width="10"
-              height="10"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              class="group-chevron"
-              :class="{ collapsed: collapsedCategories.has(group.key) }"
-            >
-              <polyline points="9 18 15 12 9 6" />
-            </svg>
-            <span class="session-group-label">{{ group.label }}</span>
-            <span class="session-group-count">{{ group.sessions.length }}</span>
-          </div>
-          <template v-if="!collapsedCategories.has(group.key)">
-            <SessionListItem
-              v-for="s in group.sessions"
-              :key="s.id"
-              :session="s"
-              :active="s.id === chatStore.activeSessionId"
-              :pinned="false"
-              :can-delete="
-                s.id !== chatStore.activeSessionId ||
-                chatStore.sessions.length > 1
-              "
-              :streaming="chatStore.isSessionLive(s.id)"
-              :completed-unread="chatStore.isSessionCompletedUnread(s.id)"
-              :selectable="isBatchMode"
-              :selected="isSessionSelected(s)"
-              :show-profile="true"
-              :to="sessionHref(s.id)"
-              :intercept-modified-navigation="desktopChatWindowAvailable"
-              @select="handleSessionClick(s.id)"
-              @open-new="openSessionInNewTab(s.id)"
-              @contextmenu="handleContextMenu($event, s.id)"
-              @delete="handleDeleteSession(s.id)"
-              @toggle-select="toggleSessionSelection(s)"
-            />
-          </template>
-        </template>
+        <!-- [fork] 隐藏分类/未分类分组，改成平铺"全部"列表 -->
+                <template v-if="unpinnedSessions.length > 0">
+                  <div class="session-group-header session-group-header--static">
+                    <span class="session-group-label">{{ t("chat.all") }}</span>
+                    <span class="session-group-count">{{ unpinnedSessions.length }}</span>
+                  </div>
+                  <SessionListItem
+                    v-for="s in unpinnedSessions"
+                    :key="s.id"
+                    :session="s"
+                    :active="s.id === chatStore.activeSessionId"
+                    :pinned="false"
+                    :can-delete="s.id !== chatStore.activeSessionId || chatStore.sessions.length > 1"
+                    :streaming="chatStore.isSessionLive(s.id)"
+                    :completed-unread="chatStore.isSessionCompletedUnread(s.id)"
+                    :selectable="isBatchMode"
+                    :selected="isSessionSelected(s)"
+                    :show-profile="true"
+                    :to="sessionHref(s.id)"
+                    :intercept-modified-navigation="desktopChatWindowAvailable"
+                    @select="handleSessionClick(s.id)"
+                    @open-new="openSessionInNewTab(s.id)"
+                    @contextmenu="handleContextMenu($event, s.id)"
+                    @delete="handleDeleteSession(s.id)"
+                    @toggle-select="toggleSessionSelection(s)"
+                  />
+                </template>
+                <!-- [/fork] 分类隐藏结束 -->
       </div>
       <div v-if="showSessions" class="page-sidebar-bottom">
         <button class="page-sidebar-menu-btn" type="button" @click="openSettingsPage">
@@ -2145,15 +2129,17 @@ async function handleSessionModelCustomSubmit() {
       <NInputNumber v-model:value="recentCountDraft" :min="1" :max="100" />
     </NModal>
 
-    <NDropdown
-      placement="bottom-start"
-      trigger="manual"
-      :x="categoryContextMenuX"
+    <!-- [fork] 分类右键菜单已隐藏 -->
+        <NDropdown
+          v-if="false"
+          placement="bottom-start"
+          trigger="manual"
+          :x="categoryContextMenuX"
       :y="categoryContextMenuY"
       :options="categoryContextMenuOptions"
       :show="showCategoryContextMenu"
-      @select="handleCategoryContextMenuSelect"
-      @clickoutside="showCategoryContextMenu = false"
+            @select="() => {}"
+            @clickoutside="showCategoryContextMenu = false"
     />
 
     <NModal
