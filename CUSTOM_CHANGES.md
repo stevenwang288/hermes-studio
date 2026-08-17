@@ -190,3 +190,15 @@ npm run build
 
 - **自研改动保留**: Windows 字体缩放 + 消息队列修复
 - **编译结果**: ✅ 通过
+
+## 上游同步 — 2026-08-17（详细记录）
+
+- **上游版本**: v0.6.42-29-g509615bf
+- **合并提交**: fc31a6e9（merge upstream/main）+ d68b5c43（冲突修复）
+- **上游新提交 (28 个)**: 509615bf c5bd1b3c 304a384e d0d72e2a 7d68a7dd d6bed4cc 85a8028c 72f767be b72e8a2b d99810a8 4826a325 cda57610 4120d13c 1684c086 d4c4ec3b af9129a7 9a885ad4 6f1f52f9 626b4f5c f586fa69 9d5ce1ee 1a0b7246 d9ea9f48 8a9bf5f4 763d85d6 c6289ec5 8839a450 ebb5face
+- **冲突情况**:
+  - `docs/openapi.json` → 采用上游版本（自动生成）
+  - `MessageList.vue` → merge 冲突保留本地，上游 9d5ce1ee 的 Pi agent 改动被误丢
+- **冲突修复 (d68b5c43)**: 手工补回 Pi agent 头像(chatSessionAgentAvatar) + clarify responseMode editor + MessageItem :assistant-agent
+- **自研改动保留**: Windows 字体缩放 + 消息队列，均已验证；编译 ✅
+- **新工具**: scripts/sync-upstream.sh（同步）+ scripts/deploy-fleet.py（部署 31/35/36/61）
