@@ -564,7 +564,10 @@ const recentSessionPartition = computed(() => partitionRecentSessions(
   t("chat.recent"),
 ));
 const recentSessions = computed(() => recentSessionPartition.value.group);
-const nonRecentSessions = computed(() => recentSessionPartition.value.remaining);
+const nonRecentSessions = computed(() => {
+  const recentIds = new Set(recentSessions.value.sessions.map(s => s.id));
+  return recentSessionPartition.value.remaining.filter(s => !recentIds.has(s.id));
+});
 
 const pinnedSessions = computed(() =>
   sortSessionsForSidebar(
