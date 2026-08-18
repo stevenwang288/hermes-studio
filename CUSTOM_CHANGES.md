@@ -12,6 +12,24 @@
 
 ---
 
+## 同步记录（2026-08-18）
+
+- 上游已更新到 `4751fd36`（v0.6.44 release）
+- **merge 上游**：`git merge upstream/main`（自动合并，零冲突）
+- **上游新功能**（7 个提交）：
+  - `d596dfc3` Provider 分组折叠状态持久化（`useCollapsedProviderGroups`）
+  - `571a246d` 文件名点开头不误判为路径穿越
+  - `a246da34` 无 model catalog 不报错
+  - `e5343d57` bridge 后备 provider 回退
+  - `973e1a5c` bridge 去重预存用户消息
+  - `2cfac0d3` 前端 changelog 0.6.44
+  - `4751fd36` release 0.6.44
+- **本 fork 三个改动**（消息队列、字体缩放、侧边栏折叠）均通过 `[fork]` / `[zoom patch]` / `[user-controlled queue]` 标记保护，merge 后全保留
+- **冲突检查**：上游 `d596dfc3` 改 `ChatPanel.vue`（模型选择弹窗区域），与本 fork 侧边栏折叠（分类分组区域）无重叠，零冲突
+- 当前版本：**0.6.44**；本 fork 三个自定义改动已验证保留
+
+---
+
 ## 同步记录（2026-08-13）
 
 - 上游已更新到 `0899f7eb`（v0.6.42 之后 1 个 hotfix：#2511 群聊滚动摘要游标安全）
