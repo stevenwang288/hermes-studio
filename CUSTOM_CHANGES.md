@@ -14,17 +14,57 @@
 
 ## 同步记录（2026-08-19）
 
-- 上游已更新到 `6401d5b2`（5 个新提交，0.6.44 之后）
-- **merge 上游**：`git merge upstream/main`（自动合并，零冲突）
-- **上游新功能**（5 个提交）：
-  - `6401d5b2` 会话标题自动方向（RTL 修复）
-  - `122c1a12` session reset 历史可见性修复
-  - `5dd0b8fd` 切换会话自动聚焦输入框
-  - `537ee643` 上传 413 错误处理修复
-  - `b7f7837b` 推理 effort 滑块提示条数
-- **本 fork 改动**：消息队列 + 字体缩放 + 侧边栏折叠，全部保留
-- **冲突检查**：上游 `6401d5b2`/`5dd0b8fd`/`b7f7837b` 涉及 `ChatPanel.vue`/`ChatInput.vue`，与本 fork 改动区域不重叠，零冲突
-- 本 fork 版本：**0.6.45-fork.1**（确保 version > 上游 0.6.44，autoUpdater 不会误提示更新）
+- 上游已更新到 `5100e8e`
+- **本 fork 新增 2 个改动**（见下方改动三、改动四），已在 36号 实测验证通过
+- 版本：**0.6.45-fork.1**（不变）
+
+---
+
+## 改动三：URL 点击跳转系统默认浏览器（Windows 桌面版）
+
+### 问题背景
+Hermes Studio 桌面版（Electron）在 `MarkdownRenderer.vue` 中点击 URL 时，通过 `openUrlInDesktopBrowser` 调用 `browser.createTab(url, true)` 在**内置浏览器面板**中打开。用户希望在 Windows 桌面上点 URL 直接跳转到**系统默认浏览器**（如 Chrome/Edge），而不是在 Studio 的内置面板里。
+
+### 解决方案（本 fork 已实现）
+在 Electron 主进程和渲染进程之间新增一条 `openUrl` IPC 通道，用 `shell.openExternal(url)` 替换原有的 `browser.createTab(url, true)` 行为。
+
+### 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `packages/desktop/src/preload/index.ts` | 新增 `openUrl` IPC 通道（`hermes-desktop:open-url`） |
+| `packages/desktop/src/main/index.ts` | 新增 `ipcMain.handle('hermes-desktop:open-url')` → `shell.openExternal` |
+| `packages/client/src/utils/desktop-bridge.ts` | `HermesDesktopBridge` 接口新增 `openUrl?: (url: string) => Promise<boolean>` |
+| `packages/client/src/utils/desktop-browser.ts` | `openUrlInDesktopBrowser` 优先调 `bridge.openUrl`，失败回退 `browser.createTab` |
+| `README.md` | 文档更新 |
+
+### 效果
+- 桌面版点击聊天消息中的 URL → 直接跳转到 **Windows 默认浏览器**打开
+- 如果 `openUrl` IPC 不可用（如旧版 preload），自动回退到内置浏览器面板
+
+---
+
+## 改动四：对话标题右侧路径显示完整宽度
+
+### 问题背景
+对话标题右侧的 `workspace-badge` 只显示路径最后一段（`split("/").pop()`），且 CSS 限制 `max-width: 160px`，长路径被截断。
+
+### 解决方案（本 fork 已实现）
+1. 模板：去掉 `split("/").pop()`，直接显示完整路径
+2. CSS：`max-width: 160px` → `min(520px, 55vw)`
+3. `header-session-title` 加 `min-width: 0` 确保标题可收缩，让路径优先占宽
+4. 路径文本改用等宽字体（`ui-monospace`），方便阅读目录结构
+
+### 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `packages/client/src/components/hermes/chat/ChatPanel.vue` | 模板显示完整路径；CSS 放宽宽度限制 + 等宽字体 |
+
+### 效果
+- 工作区路径完整显示（不再截断为最后一段）
+- 宽度自适应，最长 `min(520px, 55vw)`
+- 标题自动收缩让位
 
 ---
 
