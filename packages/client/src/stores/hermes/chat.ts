@@ -2967,10 +2967,13 @@ function promoteQueuedMessage(sessionId: string, messageId: string) {
     }
 
     if (Array.isArray((evt as any).queued_messages)) {
-      const queued = normalizeQueuedUserMessages((evt as any).queued_messages)
-      replaceQueuedUserMessages(sessionId, queued)
-      return
-    }
+          const queued = normalizeQueuedUserMessages((evt as any).queued_messages)
+          // [user-controlled patch] 过滤掉已经在会话区中的消息,避免服务端权威队列
+          // 把已放行的消息又加回队列面板(消息队列残留 bug)。
+          const filtered = queued.filter(msg => !getSessionMsgs(sessionId).some(m => m.id === msg.id))
+          replaceQueuedUserMessages(sessionId, filtered)
+          return
+        }
 
     const peer = evt.message
     const content = typeof peer?.content === 'string' ? peer.content : ''
