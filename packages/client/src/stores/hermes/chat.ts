@@ -1256,12 +1256,18 @@ export const useChatStore = defineStore('chat', () => {
   )
   /** sessionId → queued message count */
   const queueLengths = ref<Map<string, number>>(new Map())
-  /** sessionId → queued user messages not yet visible in the transcript */
-  const queuedUserMessages = ref<Map<string, Message[]>>(new Map())
-  /** sessionId → server-owned safe-boundary insertion state */
-  const queueInsertionStates = ref<Map<string, QueueInsertionState>>(new Map())
-  /** sessionId → queue ids that server reported as dequeued before the peer message arrived */
-  const dequeuedQueueIds = ref<Map<string, Set<string>>>(new Map())
+    /** sessionId → queued user messages not yet visible in the transcript */
+    const queuedUserMessages = ref<Map<string, Message[]>>(new Map())
+    /** sessionId → server-owned safe-boundary insertion state */
+    const queueInsertionStates = ref<Map<string, QueueInsertionState>>(new Map())
+    /** sessionId → queue ids that server reported as dequeued before the peer message arrived */
+    const dequeuedQueueIds = ref<Map<string, Set<string>>>(new Map())
+    /**
+     * [user-controlled patch] 滚动信号:promoteQueuedMessage 乐观把排队消息
+     * 立即放入会话区时递增,MessageList 监听它执行 scrollToBottom,
+     * 让放行的消息立刻出现在视野里,不用等服务端 run.queued 来回网络。
+     */
+    const scrollToBottomCounter = ref(0)
 
   // [user-controlled patch] promote/立即发送时被乐观移除的排队消息快照:
   // 服务端确认出队(dequeued_queue_id 回传)后,若本地队列已无该条(乐观移除),
@@ -2768,6 +2774,14 @@ function promoteQueuedMessage(sessionId: string, messageId: string) {
     // 权威队列,前端 replace 恢复显示,不会丢消息。
     dropQueuedUserMessage(sessionId, messageId)
     markDequeuedQueueId(sessionId, messageId)
+    // [user-controlled patch] 乐观把消息立即显示到会话区,不等服务端 run.queued
+    // 回调,消除 Ctrl+Enter 放行后\"队列空了但消息还没出现\"的迟钝感。
+    // 服务端后续 handleRunQueuedEvent 已有去重检查,不会重复添加。
+    if (!getSessionMsgs(sessionId).some(msg => msg.id === messageId)) {
+      addMessage(sessionId, { ...target, queued: false })
+      updateSessionTitle(sessionId)
+    }
+    scrollToBottomCounter.value++
     const snap = new Map(promotedMessageSnapshots.value)
     const per = snap.get(sessionId) || new Map()
     per.set(messageId, { ...target, queued: false })
@@ -5164,7 +5178,8 @@ function promoteQueuedMessage(sessionId: string, messageId: string) {
     isAborting,
     queueLengths,
     queuedUserMessages,
-    queueInsertionStates,
+        queueInsertionStates,
+        scrollToBottomCounter,
     activeMessageReference,
     pendingApprovals,
     activePendingApproval,

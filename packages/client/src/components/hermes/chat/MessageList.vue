@@ -518,6 +518,16 @@ watch(
   },
 );
 
+// [user-controlled patch] 排队消息被 Ctrl+Enter/立即发送放行时,
+// store 乐观把消息放入会话区并递增 scrollToBottomCounter,
+// 这里监听它立即滚动到底部,让放行的消息马上进入视野。
+watch(
+  () => chatStore.scrollToBottomCounter,
+  (v) => {
+    if (v > 0) scrollToBottom({ frames: 3, keepAliveMs: 400 });
+  },
+);
+
 watch(
   isRunIndicatorActive,
   (visible) => {
