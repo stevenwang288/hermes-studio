@@ -984,17 +984,23 @@ function handleKeydown(e: KeyboardEvent) {
     return
   }
 
-  // Ctrl+Enter: 与 ESC 相同，放行队首一条排队消息。
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-    const sid = chatStore.activeSessionId
-    const queue = sid ? (chatStore.queuedUserMessages.get(sid) || []) : []
-    if (sid && queue.length > 0) {
-      e.preventDefault()
-      chatStore.promoteQueuedMessage(sid, queue[0].id)
-      return
+  // Ctrl+Enter: 队列有消息时合并放行(>1条)或单条放行(=1条)。
+    // 合并放行把所有排队消息输入合成一条综合指令发给模型,
+    // 让模型看到全部上下文后统一理解处理,避免逐条打断导致前面的任务被遗忘。
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      const sid = chatStore.activeSessionId
+      const queue = sid ? (chatStore.queuedUserMessages.get(sid) || []) : []
+      if (sid && queue.length > 0) {
+        e.preventDefault()
+        if (queue.length > 1) {
+          chatStore.promoteAllQueuedMessages(sid)
+        } else {
+          chatStore.promoteQueuedMessage(sid, queue[0].id)
+        }
+        return
+      }
+      // 队列为空时 Ctrl+Enter 不做特殊操作，允许后续 Enter 逻辑处理
     }
-    // 队列为空时 Ctrl+Enter 不做特殊操作，允许后续 Enter 逻辑处理
-  }
 
   if (e.key !== 'Enter' || e.shiftKey) return
   if (isImeEnter(e)) return

@@ -2792,10 +2792,32 @@ function promoteQueuedMessage(sessionId: string, messageId: string) {
     snap.set(sessionId, per)
     promotedMessageSnapshots.value = snap
     getChatRunSocket(runtimeTransport())?.emit('run.promote', {
-      session_id: sessionId,
-      queue_id: messageId,
-    })
-  }
+          session_id: sessionId,
+          queue_id: messageId,
+        })
+      }
+
+      // [user-controlled patch] 合并放行:一次 Ctrl+Enter 把队列里所有消息合并成
+      // 一条综合指令发给模型,让模型看到全部上下文后统一理解、综合处理,
+      // 避免逐条 promote 时后一条打断前一条导致前面的任务被遗忘。
+      function promoteAllQueuedMessages(sessionId: string) {
+        const all = queuedUserMessages.value.get(sessionId) || []
+        if (!all.length) return
+        // 乐观把全部排队消息立即显示到会话区 + 清空队列
+        all.forEach((message) => {
+          if (!getSessionMsgs(sessionId).some(msg => msg.id === message.id)) {
+            addMessage(sessionId, { ...message, queued: false })
+          }
+          dropQueuedUserMessage(sessionId, message.id)
+          markDequeuedQueueId(sessionId, message.id)
+        })
+        updateSessionTitle(sessionId)
+        scrollToBottomCounter.value++
+        serverWorking.value.add(sessionId)
+        getChatRunSocket(runtimeTransport())?.emit('run.promote_all', {
+          session_id: sessionId,
+        })
+      }
 
   function insertQueuedMessage(sessionId: string, messageId: string) {
     if (!(queuedUserMessages.value.get(sessionId) || []).some(message => message.id === messageId)) return
@@ -5193,6 +5215,7 @@ function promoteQueuedMessage(sessionId: string, messageId: string) {
     getSubagentStream,
     removeQueuedMessage,
         promoteQueuedMessage,
+        promoteAllQueuedMessages,
         insertQueuedMessage,
     setMessageReference,
     clearMessageReference,

@@ -644,6 +644,49 @@ export class ChatRunSocket {
           }
         })
 
+    socket.on('run.promote_all', async (data: { session_id?: string }) => {
+      if (!data.session_id) return
+      let state = this.sessionMap.get(data.session_id)
+      if (!state || !state.queue.length) return
+      // [user-controlled patch] 合并放行:用户一次 Ctrl+Enter 把队列里所有消息
+      // 合并成一条综合指令,让模型看到全部上下文后统一理解、综合处理,
+      // 避免逐条 promote 时后一条打断前一条导致前面的任务被遗忘。
+      if (state.isAborting) {
+        logger.info('[chat-run-socket] promote_all waiting for in-flight abort of session %s', data.session_id)
+        const waitDeadline = Date.now() + 6000
+        while (state.isAborting && Date.now() < waitDeadline) {
+          await new Promise(resolve => setTimeout(resolve, 50))
+          state = this.sessionMap.get(data.session_id)
+          if (!state || !state.queue.length) return
+        }
+        logger.info('[chat-run-socket] promote_all proceeding after abort wait for session %s', data.session_id)
+      }
+      const pending = state.queue.slice()
+      state.queue = []
+      const mergedInput = pending
+        .map((item, index) => {
+          const text = typeof item.input === 'string'
+            ? item.input
+            : JSON.stringify(item.input)
+          return `${index + 1}. ${text}`
+        })
+        .join('\n')
+      const combined = `用户有以下 ${pending.length} 条请求，请先完整理解全部内容，再做综合判断后逐一处理：\n\n${mergedInput}\n\n注意：\n- 判断各条请求之间是否相关（相关就合并思路处理，独立就分别处理）\n- 不要遗漏任何一条请求\n- 处理完后逐条给出结果`
+      const first = pending[0]
+      const merged: QueuedRun = {
+        ...first,
+        queue_id: `merge_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+        input: combined,
+      }
+      state.queue.unshift(merged)
+      logger.info('[chat-run-socket] promote_all merged %d queued runs for session %s', pending.length, data.session_id)
+      await handleAbort(this.nsp, socket, data.session_id, this.sessionMap, this.bridge, this.runQueuedItem.bind(this))
+      const after = this.sessionMap.get(data.session_id)
+      if (after && !after.isWorking && after.queue.length > 0) {
+        this.dequeueNextQueuedRun(socket, data.session_id, first.profile || 'default')
+      }
+    })
+
     socket.on('resume', async (data: { session_id?: string }) => {
       if (!data.session_id) return
       const sid = data.session_id
