@@ -601,32 +601,48 @@ export class ChatRunSocket {
     // 使其马上开始回复(markAbortCompleted 出队队首即该消息)。前端"立即发送"
     // 按钮与 ESC 放行都走这个事件。
     socket.on('run.promote', async (data: { session_id?: string; queue_id?: string }) => {
-      if (!data.session_id || !data.queue_id) return
-      const state = this.sessionMap.get(data.session_id)
-      if (!state || !state.queue.length) return
-      const targetIndex = state.queue.findIndex(item => item.queue_id === data.queue_id)
-      if (targetIndex === -1) {
-        logger.info('[chat-run-socket] promote miss %s for session %s (queue: %d)', data.queue_id, data.session_id, state.queue.length)
-        // [user-controlled patch] promote miss 时也回传权威队列,让前端乐观移除
-        // 能与服务端最终一致(前端已本地移除,若服务端队列里没有该消息则无需恢复,
-        // 若存在则靠 replace 恢复显示)。
-        this.nsp.to(`session:${data.session_id}`).emit('run.queued', {
-          event: 'run.queued',
-          session_id: data.session_id,
-          queue_length: state.queue.length,
-          queued_messages: this.serializeQueuedMessages(state.queue),
+          if (!data.session_id || !data.queue_id) return
+          let state = this.sessionMap.get(data.session_id)
+          if (!state || !state.queue.length) return
+          // [user-controlled patch] 连续 promote 并发保护:
+          // 用户快速连按 Ctrl+Enter 时,上一次 promote 的 handleAbort 可能还在进行
+          // (isAborting=true)。若此时直接发起第二次 handleAbort,两个 abort 并发,
+          // markAbortCompleted 的 abortFinalized 幂等标志会让第二次出队逻辑被跳过,
+          // 队列里的消息永远不再出队(表现为"系统停下")。
+          // 这里的做法:等上一次 abort 完全结束(最多 6 秒)再处理本条 promote。
+          if (state.isAborting) {
+            logger.info('[chat-run-socket] promote %s waiting for in-flight abort of session %s', data.queue_id, data.session_id)
+            const waitDeadline = Date.now() + 6000
+            while (state.isAborting && Date.now() < waitDeadline) {
+              await new Promise(resolve => setTimeout(resolve, 50))
+              state = this.sessionMap.get(data.session_id)
+              if (!state || !state.queue.length) return
+            }
+            logger.info('[chat-run-socket] promote %s proceeding after abort wait for session %s', data.queue_id, data.session_id)
+          }
+          const targetIndex = state.queue.findIndex(item => item.queue_id === data.queue_id)
+          if (targetIndex === -1) {
+            logger.info('[chat-run-socket] promote miss %s for session %s (queue: %d)', data.queue_id, data.session_id, state.queue.length)
+            // [user-controlled patch] promote miss 时也回传权威队列,让前端乐观移除
+            // 能与服务端最终一致(前端已本地移除,若服务端队列里没有该消息则无需恢复,
+            // 若存在则靠 replace 恢复显示)。
+            this.nsp.to(`session:${data.session_id}`).emit('run.queued', {
+              event: 'run.queued',
+              session_id: data.session_id,
+              queue_length: state.queue.length,
+              queued_messages: this.serializeQueuedMessages(state.queue),
+            })
+            return
+          }
+          const [target] = state.queue.splice(targetIndex, 1)
+          state.queue.unshift(target)
+          logger.info('[chat-run-socket] promote %s to head for session %s (queue: %d)', data.queue_id, data.session_id, state.queue.length)
+          await handleAbort(this.nsp, socket, data.session_id, this.sessionMap, this.bridge, this.runQueuedItem.bind(this))
+          const after = this.sessionMap.get(data.session_id)
+          if (after && !after.isWorking && after.queue.length > 0) {
+            this.dequeueNextQueuedRun(socket, data.session_id, target.profile || 'default')
+          }
         })
-        return
-      }
-      const [target] = state.queue.splice(targetIndex, 1)
-      state.queue.unshift(target)
-      logger.info('[chat-run-socket] promote %s to head for session %s (queue: %d)', data.queue_id, data.session_id, state.queue.length)
-      await handleAbort(this.nsp, socket, data.session_id, this.sessionMap, this.bridge, this.runQueuedItem.bind(this))
-      const after = this.sessionMap.get(data.session_id)
-      if (after && !after.isWorking && after.queue.length > 0) {
-        this.dequeueNextQueuedRun(socket, data.session_id, target.profile || 'default')
-      }
-    })
 
     socket.on('resume', async (data: { session_id?: string }) => {
       if (!data.session_id) return
