@@ -52,7 +52,7 @@ const showMobileMenuButton = computed(() => !isLoginPage.value && !isStandaloneC
 const nodeVersionLow = computed(() => {
   const v = appStore.nodeVersion
   const major = parseInt(v.split('.')[0], 10)
-  return !isNaN(major) && major < 23
+  return !isNaN(major) && major < 20
 })
 
 const isDesktopShell = computed(() => desktopBridge()?.isDesktop === true)
