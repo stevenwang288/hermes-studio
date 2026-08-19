@@ -151,10 +151,10 @@ Unified configuration for **10 platforms** in one page:
 - Standalone desktop chat windows and persisted output/reasoning metadata
 
 ### Desktop Agent Browser
-
 - Desktop-only multi-tab browser that agents can navigate through the managed MCP server
 - Isolated browser profiles, per-tab control leases, proxy settings, downloads, cookies, and permissions
 - Accessibility snapshots, screenshots, console logs, and page annotations for agent-assisted browsing
+- **Default browser URL click** — clicking URLs in chat messages opens your **OS default browser** (Electron desktop only, powered by `shell.openExternal`)
 
 ### Skills & Memory
 

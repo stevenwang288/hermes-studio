@@ -8,7 +8,13 @@ function revealDesktopBrowserPanel(): void {
 
 export async function openUrlInDesktopBrowser(url: string): Promise<boolean> {
   if (!hasDesktopBrowserBridge()) return false
-  const browser = desktopBridge()?.browser
+  // Try shell.openExternal first (opens in OS default browser)
+  const bridge = desktopBridge()
+  if (bridge?.openUrl) {
+    return await bridge.openUrl(url)
+  }
+  // Fallback: open in Studio's built-in browser panel
+  const browser = bridge?.browser
   if (!browser) return false
   await browser.createTab(url, true)
   revealDesktopBrowserPanel()
