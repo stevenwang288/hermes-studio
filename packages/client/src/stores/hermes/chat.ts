@@ -2782,7 +2782,11 @@ function promoteQueuedMessage(sessionId: string, messageId: string) {
       updateSessionTitle(sessionId)
     }
     scrollToBottomCounter.value++
-    const snap = new Map(promotedMessageSnapshots.value)
+        // [user-controlled patch] 乐观设置"AI正在工作"状态,让前端立即显示
+        // 正在处理的指示器,不等服务端 run.started 事件(服务端可能因 bridge 延迟
+        // 或模型卡住而不发出事件,导致前端全程无反馈,感觉"完全静止")。
+        serverWorking.value.add(sessionId)
+        const snap = new Map(promotedMessageSnapshots.value)
     const per = snap.get(sessionId) || new Map()
     per.set(messageId, { ...target, queued: false })
     snap.set(sessionId, per)
