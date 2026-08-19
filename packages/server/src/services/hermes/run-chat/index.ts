@@ -662,22 +662,22 @@ export class ChatRunSocket {
         logger.info('[chat-run-socket] promote_all proceeding after abort wait for session %s', data.session_id)
       }
       const pending = state.queue.slice()
-      state.queue = []
-      const mergedInput = pending
-        .map((item, index) => {
-          const text = typeof item.input === 'string'
-            ? item.input
-            : JSON.stringify(item.input)
-          return `${index + 1}. ${text}`
-        })
-        .join('\n')
-      const combined = `用户有以下 ${pending.length} 条请求，请先完整理解全部内容，再做综合判断后逐一处理：\n\n${mergedInput}\n\n注意：\n- 判断各条请求之间是否相关（相关就合并思路处理，独立就分别处理）\n- 不要遗漏任何一条请求\n- 处理完后逐条给出结果`
-      const first = pending[0]
-      const merged: QueuedRun = {
-        ...first,
-        queue_id: `merge_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-        input: combined,
-      }
+            state.queue = []
+            const mergedInput = pending
+              .map((item, index) => {
+                const text = typeof item.input === 'string'
+                  ? item.input
+                  : JSON.stringify(item.input)
+                return `${index + 1}. ${text}`
+              })
+              .join('\n')
+            const combined = `用户按顺序发出了以下 ${pending.length} 条请求（按时间先后排列）：\n\n${mergedInput}\n\n请按以下规则综合判断后处理：\n\n1. 【修正/覆盖检测】后发的消息可能是在修改前面的消息（例如"改成2000字"是在修正前一条"写5000字"）。识别这种修正关系时，以【最后一条】表达的意图为准，不要重复执行被覆盖的任务。\n2. 【相关合并】互相关联的请求（例如"查天气"和"顺便看下雨"）合并思路统一处理。\n3. 【独立任务】互不相关的请求分别独立处理。\n4. 【完整性】不要遗漏任何一条消息表达过的重要意图，除非它被后续消息明确覆盖。\n5. 处理完后逐条给出结果，并说明哪些请求被合并/覆盖了。`
+            const first = pending[0]
+            const merged: QueuedRun = {
+              ...first,
+              queue_id: `merge_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+              input: combined,
+            }
       state.queue.unshift(merged)
       logger.info('[chat-run-socket] promote_all merged %d queued runs for session %s', pending.length, data.session_id)
       await handleAbort(this.nsp, socket, data.session_id, this.sessionMap, this.bridge, this.runQueuedItem.bind(this))
