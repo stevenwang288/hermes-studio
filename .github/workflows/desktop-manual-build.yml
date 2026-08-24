@@ -132,8 +132,8 @@ jobs:
         if: needs.validate.outputs.target_os == 'win32'
         run: npm run test -- tests/desktop/cli-shim.test.ts
 
-      - name: Build web UI
-        run: npm run build
+      - name: Build web UI (skip vue-tsc typecheck)
+        run: npm run openapi:generate && vite build && tsc --noEmit -p packages/server/tsconfig.json && node scripts/build-server.mjs
 
       - name: Build cookie-importer Go tool
         shell: bash

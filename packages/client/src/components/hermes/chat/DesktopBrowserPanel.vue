@@ -414,17 +414,17 @@ async function importBrowserCookies() {
   try {
     const result = await bridge.importBrowserCookies('chrome')
     if (result.status === 'imported') {
-      window.$message?.success?.(t('browser.cookiesImported', { count: result.count || 0 }))
+      message.success(t('browser.cookiesImported', { count: result.count || 0 }))
     } else if (result.status === 'locked') {
-      window.$message?.warning?.(t('browser.cookiesImportLocked'))
+      message.warning(t('browser.cookiesImportLocked'))
     } else if (result.status === 'empty') {
-      window.$message?.info?.(t('browser.cookiesImportEmpty'))
+      message.info(t('browser.cookiesImportEmpty'))
     } else if (result.status === 'error') {
-      window.$message?.error?.(t('browser.cookiesImportError', { error: result.error || '' }))
+      message.error(t('browser.cookiesImportError', { error: result.error || '' }))
     }
   } catch (err) {
     console.error('[desktop-browser] importBrowserCookies failed:', err)
-    window.$message?.error?.(t('browser.cookiesImportError', { error: String(err) }))
+    message.error(t('browser.cookiesImportError', { error: String(err) }))
   } finally {
     importingCookies.value = false
   }
