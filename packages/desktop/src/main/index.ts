@@ -1038,6 +1038,12 @@ ipcMain.handle('hermes-desktop:open-chat-window', (event, sessionId?: unknown, p
   }
   return openChatWindow(sessionId, profile)
 })
+ipcMain.handle('hermes-desktop:open-url', (_event, url?: unknown) => {
+  const target = typeof url === 'string' ? url : ''
+  if (!target) return false
+  shell.openExternal(target).catch(() => {})
+  return true
+})
 
 function browserForEvent(event: IpcMainInvokeEvent): BrowserManager {
   if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) throw new Error('Desktop browser IPC is only available to the main window')

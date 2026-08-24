@@ -164,6 +164,8 @@ export interface HermesDesktopBridge {
   setPetWindowVisible?: (visible: boolean) => Promise<DesktopPetWindowState>
   onPetWindowRefresh?: (callback: () => void) => () => void
   browser?: DesktopBrowserBridge
+  /** Open a URL in the OS default browser (shell.openExternal). Returns true if handled. */
+  openUrl?: (url: string) => Promise<boolean>
   platform: string
   isDesktop: boolean
   windowKind?: 'main' | 'pet' | 'chat'
