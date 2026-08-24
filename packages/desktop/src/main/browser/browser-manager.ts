@@ -729,8 +729,10 @@ export class BrowserManager {
     let exePath: string | null = null
     const candidates: string[] = []
     if (app.isPackaged) {
+      candidates.push(join(process.resourcesPath, 'build', exeName))
       candidates.push(join(process.resourcesPath, exeName))
     } else {
+      candidates.push(join(app.getAppPath(), 'cookie-importer', 'build', exeName))
       candidates.push(join(app.getAppPath(), 'cookie-importer', exeName))
     }
     for (const candidate of candidates) {

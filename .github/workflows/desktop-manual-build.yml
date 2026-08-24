@@ -135,6 +135,17 @@ jobs:
       - name: Build web UI
         run: npm run build
 
+      - name: Build cookie-importer Go tool
+        shell: bash
+        run: |
+          cd packages/desktop/cookie-importer
+          exe_name="hermes-cookie-importer"
+          if [ "${{ needs.validate.outputs.target_os }}" = "win32" ]; then exe_name="${exe_name}.exe"; fi
+          GOOS=${{ needs.validate.outputs.target_os == 'win32' && 'windows' || needs.validate.outputs.target_os == 'darwin' && 'darwin' || 'linux' }}
+          GOARCH=${{ needs.validate.outputs.target_arch }}
+          go build -o "build/${exe_name}" -ldflags="-s -w" .
+          echo "Cookie importer built: build/${exe_name}"
+
       - name: Keep production web UI dependencies only
         run: npm prune --omit=dev --no-audit --no-fund
 

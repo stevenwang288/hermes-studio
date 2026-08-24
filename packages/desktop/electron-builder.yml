@@ -36,6 +36,7 @@ extraResources:
       - "trayMac@2x.png"
       - "trayWindows.png"
       - "runtime-release.json"
+      - "hermes-cookie-importer*"
   - from: "../.."
     to: "webui"
     filter:
