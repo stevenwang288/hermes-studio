@@ -1,7 +1,7 @@
 # 本 Fork 的自定义改动（stevenwang288/hermes-studio）
 
 本仓库是 `EKKOLearnAI/hermes-studio` 的 fork。`main` 分支 = **上游最新 + 本 fork
-的两个自定义改动**（消息队列、桌面字体缩放）。所有改动都固化在源码里、带清晰
+的四个自定义改动**（消息队列、桌面字体缩放、元素点选、Cookie导入）。所有改动都固化在源码里、带清晰
 `[zoom patch]` / `[preempt patch]` 标记，**上游更新后 merge 回来不会被覆盖**。
 
 > ⚠️ **credits 点数系统已于 2026-08-13 从本仓库剥离**（`git revert 99718a54`）。
@@ -35,6 +35,45 @@
   - `openapi.json`：取上游版本
 - **编译验证**：✅ 通过（vue-tsc 类型检查 + vite build + tsc server + build-server，产物含 ESP32-C3 firmware）
 - **npm 环境踩坑**：本机 `.npmrc` 配置了 `omit=dev`（`npm config get omit` 返回 `dev`），导致 `npm install` 默认不装 devDependencies（vite/vue-tsc/文档类包全缺失）。**必须用 `npm install --include=dev`** 强制装 devDependencies 才能 build。
+
+---
+
+## 新增功能一：桌面浏览器元素点选器（element-picker）
+
+### 功能
+在桌面版内置浏览器中，点击工具栏吸管图标，鼠标悬停高亮元素，点击后自动采集元素信息（CSS选择器、XPath、颜色、字体、位置、文本、HTML片段），并格式化插入到聊天输入框，方便AI精确描述页面元素。
+
+### 实现方式
+- `packages/desktop/src/main/browser/element-picker.ts`：自包含的ES5脚本（`PICKER_SCRIPT`），通过 Electron 的 `executeJavaScriptInIsolatedWorld` 注入到目标页面
+- `browser-manager.ts`：`pickElement()` 方法调用注入
+- 前端 `DesktopBrowserPanel.vue`：工具栏吸管按钮，`formatPickedElement` 格式化后触发 `CustomEvent('hermes:browser-pick-element')` 插入输入框
+- `ChatInput.vue`：监听自定义事件，`insertBrowserPickText` 在光标位置插入文本
+
+### 范围
+仅桌面版内置浏览器可用。网页版（Linux节点）没有 Electron 的 `executeJavaScriptInIsolatedWorld` 能力。
+
+---
+
+## 新增功能二：导入系统浏览器登录态（Cookie Import）
+
+### 功能
+桌面版内置浏览器支持从系统默认浏览器（Chrome/Edge）导入登录态（Cookie），用户无需在内置浏览器中重新登录已访问过的网站。
+
+### 实现方式
+- **Go CLI 工具**（`packages/desktop/cookie-importer/main.go`）：基于 `github.com/Code-Hex/browsercookie` 库，读取 Chrome/Edge 的 Cookie 数据库，解密后输出 JSON
+- **Electron 集成**（`browser-manager.ts` 的 `importBrowserCookies()` 方法）：通过 `child_process.execFile` 调用 Go CLI → 解析 JSON → 用 `browserSession.cookies.set()` 逐条注入到内置浏览器 Profile 的 Session
+- **前端 UI**（`DesktopBrowserPanel.vue`）：工具栏新增"导入登录态"按钮，点击后弹出提示
+- **CI 编译**（`desktop-manual-build.yml`）：Workflow 自动交叉编译 Go 工具，通过 `electron-builder.yml` 的 `extraResources` 打包到桌面版安装包
+
+### 使用方式
+1. 关闭 Chrome/Edge（运行中时 Cookie 文件被独占锁）
+2. 打开桌面版内置浏览器，点击工具栏"导入登录态"按钮（📋图标）
+3. 提示"已从 Chrome 导入 X 个 Cookie"，登录态即可使用
+
+### 范围
+仅桌面版内置浏览器可用。网页版（Linux节点）没有 Electron 的 Session 管理机制。
+
+---
 
 ---
 
