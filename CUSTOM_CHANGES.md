@@ -38,21 +38,30 @@
 
 ---
 
-## 新增功能一：桌面浏览器元素点选器（element-picker）
+## 新增功能一：桌面浏览器元素点选器（已替换为 earmark）
 
 ### 功能
-在桌面版内置浏览器中，点击工具栏吸管图标，鼠标悬停高亮元素，点击后自动采集元素信息（CSS选择器、XPath、颜色、字体、位置、文本、HTML片段），并格式化插入到聊天输入框，方便AI精确描述页面元素。
+桌面版内置浏览器工具栏新增 earmark 开关按钮，用户可在任意页面（包括第三方网站）打开 earmark overlay，圈选 UI 元素并添加备注。注解通过 broker 存储，Hermes agent 可通过 MCP 读取，实现"圈选→标注→改代码"的闭环。
 
 ### 实现方式
-- `packages/desktop/src/main/browser/element-picker.ts`：自包含的ES5脚本（`PICKER_SCRIPT`），通过 Electron 的 `executeJavaScriptInIsolatedWorld` 注入到目标页面
-- `browser-manager.ts`：`pickElement()` 方法调用注入
-- 前端 `DesktopBrowserPanel.vue`：工具栏吸管按钮，`formatPickedElement` 格式化后触发 `CustomEvent('hermes:browser-pick-element')` 插入输入框
-- `ChatInput.vue`：监听自定义事件，`insertBrowserPickText` 在光标位置插入文本
+- **earmark 集成**：基于 `earmark` npm 包，将前端 overlay 打包为自包含 bundle（`earmark-bundle.js`），通过 `browser-manager.ts` 的 `toggleEarmark(tabId)` 方法注入到内置浏览器打开的任意页面（`webContents.executeJavaScript`）
+- **broker 服务**：`packages/server/src/services/earmark.ts` 模块，随 Hermes 服务端自动启动 `earmark-server`（127.0.0.1:7331，loopback only），使用 SQLite 持久化注解
+- **前端 UI**：`DesktopBrowserPanel.vue` 工具栏新增 earmark 开关按钮，点击后注入 overlay，再次点击关闭
+- **IPC 桥接**：`preload/index.ts` → `main/index.ts` → `browser-manager.ts` 完整链路
 
-### 范围
-仅桌面版内置浏览器可用。网页版（Linux节点）没有 Electron 的 `executeJavaScriptInIsolatedWorld` 能力。
+### 提示
+- 桌面版和网页版都通用（broker 随 Hermes 服务端启动，前端 overlay 通过 earmark 原生的 `<script>` 注入方式也可用于网页版）
+- 圈选完成后，注解存储在 `HERMES_WEB_UI_HOME/earmark/annotations.db`，支持导入/导出
+
+### 原 element-picker 已移除
+- 文件 `element-picker.ts` 删除
+- `browser-manager.ts` 的 `pickElement` 方法移除
+- `browser-types.ts` 的 `PickedElement`/`PickerResult` 类型移除
+- 前端吸管按钮和相关 i18n key 全部移除
 
 ---
+
+## 新增功能二：导入系统浏览器登录态（Cookie Import）
 
 ## 新增功能二：导入系统浏览器登录态（Cookie Import）
 
