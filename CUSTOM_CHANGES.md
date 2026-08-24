@@ -12,6 +12,32 @@
 
 ---
 
+## 同步记录（2026-08-25）
+
+- 上游已更新到 `8a194dc7`（v0.6.47 release + 1 个 hotfix，41 个新提交，从 `c8a271aa` 到 `8a194dc7`）
+- **上游版本跨度**：v0.6.44 → **v0.6.47**（含多个 release：0.6.45 / 0.6.46 / 0.6.47）
+- **merge 上游**：`git merge upstream/main`，**7 个文件冲突**，全部手工解决
+- **上游新功能**（主要）：
+  - 聊天保持思考时长跨导航（#2723）
+  - 独立社交消息推送（#2718，Telegram/飞书/微信）
+  - App Relay 路由选择（#2683）
+  - Git 感知文件浏览器（#2674）
+  - 可复用 Agent 预设（#2644）
+  - coding agent 队列插入（#2667）—— **上游也实现了队列插入，与我们的消息队列共存**
+  - 图片生成/编辑模型选择（#2691）
+  - 会话折叠、群聊房间邀请码、上传大小可配置等
+- **本 fork 改动**：消息队列 + 字体缩放 + 侧边栏折叠，全部保留（`preempt`/`promoteQueuedMessage`/`queuedUserMessages` 已验证）
+- **冲突解决明细**：
+  - `run-chat/index.ts` / `chat.ts`：上游加 `push_enabled`，我们加 `preempt`，**共存**
+  - `package.json` / `desktop/package.json`：版本 → **0.6.47-fork.1**
+  - `MessageList.vue`：保留我们的队列 UI + 补回上游 `MessageQueueFloatPanel`（coding agent 队列浮窗，与我们的用户消息队列独立）+ `queuedPreview` helper（上游有重复定义，删我们的手动副本）
+  - `ChatPanel.vue`：保留我们的 `recentIds` 去重 + 上游分类菜单/折叠
+  - `openapi.json`：取上游版本
+- **编译验证**：✅ 通过（vue-tsc 类型检查 + vite build + tsc server + build-server，产物含 ESP32-C3 firmware）
+- **npm 环境踩坑**：本机 `.npmrc` 配置了 `omit=dev`（`npm config get omit` 返回 `dev`），导致 `npm install` 默认不装 devDependencies（vite/vue-tsc/文档类包全缺失）。**必须用 `npm install --include=dev`** 强制装 devDependencies 才能 build。
+
+---
+
 ## 同步记录（2026-08-19）
 
 - 上游已更新到 `6401d5b2`（5 个新提交，0.6.44 之后）

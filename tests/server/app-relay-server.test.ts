@@ -508,6 +508,7 @@ describe('LocalAppRelayServer', () => {
       id: 'http-1',
       method: 'GET',
       path: '/api/hermes/sessions?profile=default',
+      headers: { 'if-match': '"revision-1"' },
     }, ack)
 
     await vi.waitFor(() => expect(ack).toHaveBeenCalledWith(expect.objectContaining({
@@ -521,6 +522,7 @@ describe('LocalAppRelayServer', () => {
     )
     const headers = fetchImpl.mock.calls[0][1]?.headers as Headers
     expect(headers.get('authorization')).toBe('Bearer local-user-token')
+    expect(headers.get('if-match')).toBe('"revision-1"')
     expect(clientSocketMocks.io).not.toHaveBeenCalled()
 
     fetchImpl.mockResolvedValueOnce(new Response(Uint8Array.from([7, 8, 9]), {
@@ -597,6 +599,22 @@ describe('LocalAppRelayServer', () => {
       event: 'run',
     })))
     expect(local.emit).toHaveBeenCalledWith('run', { session_id: 'session-1', input: 'hello' })
+
+    const resumeAck = vi.fn()
+    app.__handlers.get('socket.event')({
+      id: 'chat-1',
+      event: 'app.resume',
+      payload: { session_id: 'session-1', id: 'cache-1' },
+    }, resumeAck)
+    await vi.waitFor(() => expect(resumeAck).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'chat-1',
+      ok: true,
+      event: 'app.resume',
+    })))
+    expect(local.emit).toHaveBeenCalledWith('app.resume', {
+      session_id: 'session-1',
+      id: 'cache-1',
+    })
 
     const insertAck = vi.fn()
     app.__handlers.get('socket.event')({
