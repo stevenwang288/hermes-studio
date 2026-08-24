@@ -39,21 +39,21 @@
 
 ---
 
-## 新增功能一：桌面浏览器元素点选器（已替换为 earmark）
+## 新增功能一：桌面浏览器 earmark 注解（替代原 element-picker）
 
 ### 功能
-桌面版内置浏览器工具栏新增 earmark 开关按钮，用户可在任意页面（包括第三方网站）打开 earmark overlay，圈选 UI 元素并添加备注。注解通过 broker 存储，Hermes agent 可通过 MCP 读取，实现"圈选→标注→改代码"的闭环。
+桌面版内置浏览器工具栏新增 earmark 开关按钮，用户可在任意页面（包括第三方网站）打开 earmark overlay，圈选 UI 元素并添加备注。注解通过本地 broker 存储，实现"圈选→标注→改代码"的闭环。
 
 ### 实现方式
-- **earmark 集成**：基于 `earmark@0.1.1` npm 包：基于 `earmark` npm 包，将前端 overlay 打包为自包含 bundle（`earmark-bundle.js`），通过 `browser-manager.ts` 的 `toggleEarmark(tabId)` 方法注入到内置浏览器打开的任意页面（`webContents.executeJavaScript`）
-- **broker 服务**：`packages/server/src/services/earmark.ts` 模块，随 Hermes 服务端自动启动 `earmark-server`（127.0.0.1:7331，loopback only），使用 SQLite 持久化注解
-- **前端 UI**：`DesktopBrowserPanel.vue` 工具栏新增 earmark 开关按钮，点击后注入 overlay，再次点击关闭
-- **IPC 桥接**：`preload/index.ts` → `main/index.ts` → `browser-manager.ts` 完整链路
+- **overlay 注入**：自包含 bundle `packages/desktop/src/main/browser/earmark-bundle.js`（同步副本在 `packages/desktop/build/`），通过 `browser-manager.ts` 的 `toggleEarmark(tabId)` 方法注入到内置浏览器打开的任意页面（`webContents.executeJavaScript`），endpoint 指向 `http://127.0.0.1:7331`
+- **broker 服务**：`packages/server/src/services/earmark.ts`，依赖 `earmark-server@^0.1.1`（dependencies），随 Hermes 服务端启动（`index.ts` 调用 `startEarmark()`，关闭时 `stopEarmark()`），绑定 127.0.0.1:7331（loopback only），SQLite 持久化到 `HERMES_WEB_UI_HOME/earmark/annotations.db`
+- **前端 UI**：`DesktopBrowserPanel.vue` 工栏 earmark 开关按钮 + 注解列表/提交逻辑；按钮文案 i18n key 为 `browser.earmarkToggle`
+- **IPC 桥接**：`preload/index.ts`（`toggleEarmark`）→ `main/index.ts`（`hermes-desktop:browser-toggle-earmark`）→ `browser-manager.ts`
 
-### 提示
-- 桌面版和网页版都通用（broker 随 Hermes 服务端启动，桌面版通过内置浏览器注入，网页版通过 earmark 原生 `<script>` 标签注入）
-- **汉化**：工具栏按钮已全部中文化（圈选元素、选中文字、框选区域、冻结动画、标注列表、注记框提示等）（broker 随 Hermes 服务端启动，前端 overlay 通过 earmark 原生的 `<script>` 注入方式也可用于网页版）
-- 圈选完成后，注解存储在 `HERMES_WEB_UI_HOME/earmark/annotations.db`，支持导入/导出
+### 当前范围与限制（2026-08-25 核实）
+- 仅桌面版内置浏览器可用。网页版没有 earmark 注入入口。
+- overlay 界面语言为 earmark 包自带英文，未汉化（i18n 中仅开关按钮 tooltip 是中文）。
+- `earmark-mcp@^0.1.1` 在 devDependencies 中声明但代码未引用——agent 读取注解需直接访问 broker HTTP API（127.0.0.1:7331）。
 
 ### 原 element-picker 已移除
 - 文件 `element-picker.ts` 删除
@@ -65,23 +65,20 @@
 
 ## 新增功能二：导入系统浏览器登录态（Cookie Import）
 
-
 ### 功能
-桌面版内置浏览器支持从系统默认浏览器（Chrome/Edge）导入登录态（Cookie），用户无需在内置浏览器中重新登录已访问过的网站。
+桌面版内置浏览器支持从系统 Chrome 导入登录态（Cookie），用户无需在内置浏览器中重新登录已访问过的网站。
 
-### 实现方式
-- **Go CLI 工具**（`packages/desktop/cookie-importer/main.go`）：基于 `github.com/Code-Hex/browsercookie` 库，读取 Chrome/Edge 的 Cookie 数据库，解密后输出 JSON
-- **Electron 集成**（`browser-manager.ts` 的 `importBrowserCookies()` 方法）：通过 `child_process.execFile` 调用 Go CLI → 解析 JSON → 用 `browserSession.cookies.set()` 逐条注入到内置浏览器 Profile 的 Session
-- **前端 UI**（`DesktopBrowserPanel.vue`）：工具栏新增"导入登录态"按钮，点击后弹出提示
-- **CI 编译**（`desktop-manual-build.yml`）：Workflow 自动交叉编译 Go 工具，通过 `electron-builder.yml` 的 `extraResources` 打包到桌面版安装包
+### 实现方式（已交付并合入 main）
+- **Go CLI 工具**（`packages/desktop/cookie-importer/main.go`）：基于 `github.com/Code-Hex/browsercookie` 库，读取 Chrome Cookie 数据库，解密后输出 JSON
+- **Electron 集成**（`browser-manager.ts` 的 `importBrowserCookies()` 方法）：`child_process.execFile` 调用 Go CLI → 解析 JSON → `browserSession.cookies.set()` 逐条注入内置浏览器 Profile Session
+- **IPC 链路**：`preload/index.ts`（`importBrowserCookies`）→ `main/index.ts`（`hermes-desktop:browser-import-cookies`）
+- **前端 UI**（`DesktopBrowserPanel.vue`）：工具栏"导入登录态"按钮，四种结果状态（imported / locked / empty / error）均有提示；i18n 文案位于 `zh.ts` / `en.ts`
+- **CI 编译**（`desktop-manual-build.yml`）：Workflow 自动编译 Go 工具，`electron-builder.yml` 的 `extraResources` 打包进安装包
 
-### 使用方式
-1. 关闭 Chrome/Edge（运行中时 Cookie 文件被独占锁）
-2. 打开桌面版内置浏览器，点击工具栏"导入登录态"按钮（📋图标）
-3. 提示"已从 Chrome 导入 X 个 Cookie"，登录态即可使用
-
-### 范围
-仅桌面版内置浏览器可用。网页版（Linux节点）没有 Electron 的 Session 管理机制。
+### 当前限制（2026-08-25 实测）
+- **Chrome v127+（cookie 格式 v20）启用 App-Bound Encryption**：cookie 加密密钥由系统级 Elevation Service（SYSTEM 权限）保管，用户态进程无法解密。Go importer 在新版 Chrome 上返回错误 `unsupported operating system: chromium v20 cookies require app-bound decryption`。本机 Chrome 151.0.7922.174 实测复现，Edge 同样受影响。
+- 因此该功能目前仅对未启用 App-Bound Encryption 的旧版 Chromium 系浏览器有效。对新版 Chrome 的支持需要走 IElevator COM 解密方案，尚未实现。
+- 使用前需关闭 Chrome（运行中时 Cookie 数据库被独占锁）。
 
 ---
 
