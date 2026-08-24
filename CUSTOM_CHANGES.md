@@ -1,7 +1,7 @@
 # 本 Fork 的自定义改动（stevenwang288/hermes-studio）
 
 本仓库是 `EKKOLearnAI/hermes-studio` 的 fork。`main` 分支 = **上游最新 + 本 fork
-的四个自定义改动**（消息队列、桌面字体缩放、元素点选、Cookie导入）。所有改动都固化在源码里、带清晰
+的五个自定义改动**（消息队列、桌面字体缩放、元素点选、Cookie导入）。所有改动都固化在源码里、带清晰
 `[zoom patch]` / `[preempt patch]` 标记，**上游更新后 merge 回来不会被覆盖**。
 
 > ⚠️ **credits 点数系统已于 2026-08-13 从本仓库剥离**（`git revert 99718a54`）。
@@ -34,6 +34,7 @@
   - `ChatPanel.vue`：保留我们的 `recentIds` 去重 + 上游分类菜单/折叠
   - `openapi.json`：取上游版本
 - **编译验证**：✅ 通过（vue-tsc 类型检查 + vite build + tsc server + build-server，产物含 ESP32-C3 firmware）
+- **earmark 集成**：替换旧的 element-picker（自研吸管点选），集成 `earmark@0.1.1` 注解系统（broker 随 Hermes 启动 + 内置浏览器注入 + 汉化），详见下方「新增功能一」
 - **npm 环境踩坑**：本机 `.npmrc` 配置了 `omit=dev`（`npm config get omit` 返回 `dev`），导致 `npm install` 默认不装 devDependencies（vite/vue-tsc/文档类包全缺失）。**必须用 `npm install --include=dev`** 强制装 devDependencies 才能 build。
 
 ---
@@ -44,13 +45,14 @@
 桌面版内置浏览器工具栏新增 earmark 开关按钮，用户可在任意页面（包括第三方网站）打开 earmark overlay，圈选 UI 元素并添加备注。注解通过 broker 存储，Hermes agent 可通过 MCP 读取，实现"圈选→标注→改代码"的闭环。
 
 ### 实现方式
-- **earmark 集成**：基于 `earmark` npm 包，将前端 overlay 打包为自包含 bundle（`earmark-bundle.js`），通过 `browser-manager.ts` 的 `toggleEarmark(tabId)` 方法注入到内置浏览器打开的任意页面（`webContents.executeJavaScript`）
+- **earmark 集成**：基于 `earmark@0.1.1` npm 包：基于 `earmark` npm 包，将前端 overlay 打包为自包含 bundle（`earmark-bundle.js`），通过 `browser-manager.ts` 的 `toggleEarmark(tabId)` 方法注入到内置浏览器打开的任意页面（`webContents.executeJavaScript`）
 - **broker 服务**：`packages/server/src/services/earmark.ts` 模块，随 Hermes 服务端自动启动 `earmark-server`（127.0.0.1:7331，loopback only），使用 SQLite 持久化注解
 - **前端 UI**：`DesktopBrowserPanel.vue` 工具栏新增 earmark 开关按钮，点击后注入 overlay，再次点击关闭
 - **IPC 桥接**：`preload/index.ts` → `main/index.ts` → `browser-manager.ts` 完整链路
 
 ### 提示
-- 桌面版和网页版都通用（broker 随 Hermes 服务端启动，前端 overlay 通过 earmark 原生的 `<script>` 注入方式也可用于网页版）
+- 桌面版和网页版都通用（broker 随 Hermes 服务端启动，桌面版通过内置浏览器注入，网页版通过 earmark 原生 `<script>` 标签注入）
+- **汉化**：工具栏按钮已全部中文化（圈选元素、选中文字、框选区域、冻结动画、标注列表、注记框提示等）（broker 随 Hermes 服务端启动，前端 overlay 通过 earmark 原生的 `<script>` 注入方式也可用于网页版）
 - 圈选完成后，注解存储在 `HERMES_WEB_UI_HOME/earmark/annotations.db`，支持导入/导出
 
 ### 原 element-picker 已移除
@@ -63,7 +65,6 @@
 
 ## 新增功能二：导入系统浏览器登录态（Cookie Import）
 
-## 新增功能二：导入系统浏览器登录态（Cookie Import）
 
 ### 功能
 桌面版内置浏览器支持从系统默认浏览器（Chrome/Edge）导入登录态（Cookie），用户无需在内置浏览器中重新登录已访问过的网站。
