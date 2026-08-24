@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     takeOver: (tabId: string): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:browser-take-over', tabId),
     annotate: (tabId: string, mode: 'element' | 'region'): Promise<BrowserSelection> => ipcRenderer.invoke('hermes-desktop:browser-annotate', tabId, mode),
         pickElement: (tabId: string): Promise<PickerResult> => ipcRenderer.invoke('hermes-desktop:browser-pick-element', tabId),
+        importBrowserCookies: (browser: 'chrome' | 'edge'): Promise<{ status: string; count?: number; error?: string }> => ipcRenderer.invoke('hermes-desktop:browser-import-cookies', browser),
         cancelAnnotation: (tabId: string): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:browser-cancel-annotation', tabId),
     updateAnnotationNote: (tabId: string, marker: number, note: string): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:browser-update-annotation-note', tabId, marker, note),
     captureAnnotations: (tabId: string): Promise<BrowserSelection['screenshot']> => ipcRenderer.invoke('hermes-desktop:browser-capture-annotations', tabId),

@@ -83,6 +83,7 @@ let annotationNoteUpdate: Promise<unknown> = Promise.resolve()
 let overlayCheckFrame = 0
 const overlayCheckTimers = new Map<number, number>()
 const isPicking = ref(false)
+const importingCookies = ref(false)
 
 const activeTab = computed(() => state.value?.tabs.find(tab => tab.id === state.value?.activeTabId))
 const profileOptions = computed(() => state.value?.profiles.map(profile => ({ label: profile.name, value: profile.id })) || [])
@@ -113,7 +114,7 @@ const annotationAnchorStyle = computed(() => {
   }
 })
 
-watch(() => activeTab.value?.url, value => { address.value = value || '' }, { immediate: true })
+watch(() => activeTab?.url, value => { address.value = value || '' }, { immediate: true })
 watch(externalOverlayOpen, () => { void nextTick(syncViewport) })
 watch(() => props.visible, () => { void nextTick(syncViewport) })
 
@@ -141,13 +142,13 @@ async function run(action: () => Promise<unknown>): Promise<void> {
 }
 
 function navigate(): void {
-  const tab = activeTab.value
+  const tab = activeTab
   if (!tab || !address.value.trim()) return
   void run(() => bridge!.navigate(tab.id, address.value.trim()))
 }
 
 function navigationAction(action: 'back' | 'forward' | 'reload' | 'stop'): void {
-  if (activeTab.value) void run(() => bridge!.navigationAction(activeTab.value!.id, action))
+  if (activeTab) void run(() => bridge!.navigationAction(activeTab!.id, action))
 }
 
 function resetAnnotationSession(): void {
@@ -233,11 +234,11 @@ function activateTab(tabId: string): void {
 }
 
 function takeOver(): void {
-  if (activeTab.value) void run(() => bridge!.takeOver(activeTab.value!.id))
+  if (activeTab) void run(() => bridge!.takeOver(activeTab!.id))
 }
 
 function annotate(mode: 'element' | 'region', tabId?: string): void {
-  const tab = tabId ? state.value?.tabs.find(item => item.id === tabId) : activeTab.value
+  const tab = tabId ? state.value?.tabs.find(item => item.id === tabId) : activeTab
   if (!tab) return
   if (annotationTabId.value && annotationTabId.value !== tab.id) return
   void run(async () => {
@@ -405,6 +406,31 @@ async function togglePickElement(): Promise<void> {
   }
 }
 
+
+async function importBrowserCookies() {
+  const tabId = state.value?.activeTabId
+  if (!tabId || !bridge) return
+  importingCookies.value = true
+  try {
+    const result = await bridge.importBrowserCookies('chrome')
+    if (result.status === 'imported') {
+      window.$message?.success?.(t('browser.cookiesImported', { count: result.count || 0 }))
+    } else if (result.status === 'locked') {
+      window.$message?.warning?.(t('browser.cookiesImportLocked'))
+    } else if (result.status === 'empty') {
+      window.$message?.info?.(t('browser.cookiesImportEmpty'))
+    } else if (result.status === 'error') {
+      window.$message?.error?.(t('browser.cookiesImportError', { error: result.error || '' }))
+    }
+  } catch (err) {
+    console.error('[desktop-browser] importBrowserCookies failed:', err)
+    window.$message?.error?.(t('browser.cookiesImportError', { error: String(err) }))
+  } finally {
+    importingCookies.value = false
+  }
+}
+
+
 function handleAnnotationFocusout(event: FocusEvent): void {
   const container = event.currentTarget
   const next = event.relatedTarget
@@ -558,6 +584,18 @@ onUnmounted(() => {
           <svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
             <path d="M13 13l6 6" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="import-cookies-btn"
+          :disabled="!activeTab || importingCookies"
+          :title="$t('browser.importCookies')"
+          :aria-label="$t('browser.importCookies')"
+          @click="importBrowserCookies"
+        >
+          <svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M4 4h16v2H4V4zm0 4h16v2H4V8zm0 4h12v2H4v-2zm0 4h16v2H4v-2z" />
           </svg>
         </button>
         <NInput v-model:value="address" size="small" :placeholder="t('browser.addressPlaceholder')" :disabled="busy || hasAnnotationSession" @keydown.enter="navigate" />

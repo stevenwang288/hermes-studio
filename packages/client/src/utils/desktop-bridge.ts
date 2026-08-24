@@ -109,6 +109,12 @@ export type DesktopPickerResult =
   | { element: DesktopPickedElement; status: 'selected'; tabId: string }
   | { status: 'cancelled'; tabId: string }
 
+export interface DesktopCookieImportResult {
+  status: 'imported' | 'empty' | 'locked' | 'error'
+  count?: number
+  error?: string
+}
+
 export interface DesktopBrowserBridge {
   getState: () => Promise<DesktopBrowserState>
   setViewport: (bounds: DesktopWindowBounds, visible: boolean) => Promise<DesktopBrowserState>
@@ -141,6 +147,7 @@ export interface DesktopBrowserBridge {
   takeOver: (tabId: string) => Promise<boolean>
   annotate: (tabId: string, mode: 'element' | 'region') => Promise<DesktopBrowserSelection>
     pickElement: (tabId: string) => Promise<DesktopPickerResult>
+    importBrowserCookies: (browser: 'chrome' | 'edge') => Promise<DesktopCookieImportResult>
     cancelAnnotation: (tabId: string) => Promise<boolean>
   updateAnnotationNote: (tabId: string, marker: number, note: string) => Promise<boolean>
   captureAnnotations: (tabId: string) => Promise<DesktopBrowserSelection['screenshot']>
@@ -183,7 +190,7 @@ const DESKTOP_BROWSER_METHODS: ReadonlyArray<keyof DesktopBrowserBridge> = [
   'getState', 'setViewport', 'createTab', 'closeTab', 'activateTab', 'navigate',
   'navigationAction', 'createProfile', 'chooseProfileRootDirectory', 'renameProfile', 'profileSwitchImpact',
   'switchProfile', 'updateProfile', 'deleteProfile', 'clearProfileData', 'cancelDownload',
-  'takeOver', 'annotate', 'pickElement', 'cancelAnnotation', 'updateAnnotationNote',
+  'takeOver', 'annotate', 'pickElement', 'importBrowserCookies', 'cancelAnnotation', 'updateAnnotationNote',
   'captureAnnotations', 'clearAnnotations',
   'onAnnotationRequest', 'onStateChange',
 ]

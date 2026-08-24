@@ -704,6 +704,97 @@ export class BrowserManager {
     return wasActive || hadMarks
   }
 
+  /**
+   * Import cookies from the system default browser (Chrome/Edge) into the
+   * active desktop-browser profile. Runs the bundled Go cookie-importer CLI
+   * (compiled via GitHub Actions for each platform), parses its JSON output,
+   * and injects the cookies into the current profile's Session.
+   */
+  async importBrowserCookies(browser: 'chrome' | 'edge'): Promise<{
+    status: 'imported' | 'empty' | 'locked' | 'error'
+    count?: number
+    error?: string
+  }> {
+    const profile = this.profileStore.active()
+    const browserSession = this.profileSession(profile)
+
+    // 定位打包好的 cookie-importer 可执行文件
+    const { execFile } = await import('node:child_process')
+    const { promisify } = await import('node:util')
+    const execFileAsync = promisify(execFile)
+    const { join } = await import('node:path')
+
+    // 打包版 => resourcesPath；开发模式 => cookie-importer 目录
+    const exeName = process.platform === 'win32' ? 'hermes-cookie-importer.exe' : 'hermes-cookie-importer'
+    let exePath: string | null = null
+    const candidates: string[] = []
+    if (app.isPackaged) {
+      candidates.push(join(process.resourcesPath, exeName))
+    } else {
+      candidates.push(join(app.getAppPath(), 'cookie-importer', exeName))
+    }
+    for (const candidate of candidates) {
+      try {
+        if (existsSync(candidate)) { exePath = candidate; break }
+      } catch { /* 继续查找 */ }
+    }
+    if (!exePath) {
+      return { status: 'error', error: `cookie-importer not found (tried: ${candidates.join(', ')})` }
+    }
+
+    try {
+      const { stdout } = await execFileAsync(exePath, ['-browser', browser], {
+        timeout: 30_000,
+        maxBuffer: 16 * 1024 * 1024,
+        windowsHide: true,
+      })
+      const parsed = JSON.parse(stdout) as Array<{
+        name: string
+        value: string
+        domain: string
+        path?: string
+        hostOnly?: boolean
+        httpOnly?: boolean
+        secure?: boolean
+        sameSite?: string
+        expirationDate?: number
+      }>
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        return { status: 'empty', count: 0 }
+      }
+
+      // 转成 CookiesSetDetails 并注入当前 Profile 的 Session
+      let imported = 0
+      for (const c of parsed) {
+        if (!c.name || c.value === undefined || !c.domain) continue
+        const host = c.domain.replace(/^\./, '')
+        try {
+          const url = new URL(`${c.secure ? 'https' : 'http'}://${host}${c.path || '/'}`).toString()
+          await browserSession.cookies.set({
+            url,
+            name: c.name,
+            value: c.value,
+            ...(c.hostOnly ? {} : { domain: c.domain }),
+            path: c.path || '/',
+            secure: c.secure !== false,
+            httpOnly: c.httpOnly === true,
+            sameSite: (c.sameSite as 'unspecified' | 'no_restriction' | 'lax' | 'strict') || 'unspecified',
+            ...(c.expirationDate === undefined ? {} : { expirationDate: c.expirationDate }),
+          } as import('electron').CookiesSetDetails)
+          imported++
+        } catch { /* 跳过设置失败的 cookie */ }
+      }
+      void this.emitState()
+      return { status: imported > 0 ? 'imported' : 'empty', count: imported }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (/LOCKED|being used|permission denied/i.test(message)) {
+        return { status: 'locked', error: message }
+      }
+      return { status: 'error', error: message }
+    }
+  }
+
   async destroy(timeoutMs = SESSION_SHUTDOWN_TIMEOUT_MS): Promise<void> {
     for (const item of this.downloadItems.values()) item.cancel()
     this.downloadItems.clear()
