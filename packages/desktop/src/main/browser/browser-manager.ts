@@ -32,7 +32,6 @@ import type {
   DesktopBrowserProfile,
   DesktopBrowserState,
   DesktopBrowserTab,
-  PickerResult,
 } from './browser-types'
 import { isAllowedBrowserRequest, isAllowedBrowserSubresource, normalizeBrowserUrl, publicBrowserUrl, redactBrowserText } from './browser-url'
 
