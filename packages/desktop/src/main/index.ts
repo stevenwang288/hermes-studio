@@ -1132,6 +1132,11 @@ ipcMain.handle('hermes-desktop:browser-annotate', (event, tabId?: unknown, mode?
   browserBroker?.revokeTab(String(tabId || ''))
   return manager.annotate(String(tabId || ''), mode)
 })
+ipcMain.handle('hermes-desktop:browser-pick-element', (event, tabId?: unknown) => {
+  const manager = browserForEvent(event)
+  browserBroker?.revokeTab(String(tabId || ''))
+  return manager.pickElement(String(tabId || ''))
+})
 ipcMain.handle('hermes-desktop:browser-cancel-annotation', (event, tabId?: unknown) => browserForEvent(event).cancelAnnotation(String(tabId || '')))
 ipcMain.handle('hermes-desktop:browser-update-annotation-note', (event, tabId?: unknown, marker?: unknown, note?: unknown) => {
   const value = Number(marker)

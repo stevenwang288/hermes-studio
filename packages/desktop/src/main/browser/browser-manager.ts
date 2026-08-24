@@ -32,8 +32,10 @@ import type {
   DesktopBrowserProfile,
   DesktopBrowserState,
   DesktopBrowserTab,
+  PickerResult,
 } from './browser-types'
 import { isAllowedBrowserRequest, isAllowedBrowserSubresource, normalizeBrowserUrl, publicBrowserUrl, redactBrowserText } from './browser-url'
+import { PICKER_SCRIPT } from './element-picker'
 
 interface TabRecord {
   tab: DesktopBrowserTab
@@ -54,6 +56,8 @@ const CONSOLE_LIMIT = 500
 const ANNOTATION_WORLD_ID = 999
 const ANNOTATION_CANCEL_EVENT = '__hermes_browser_cancel_annotation__'
 const ANNOTATION_STATE_KEY = '__hermes_browser_annotation_state__'
+const PICKER_WORLD_ID = 998
+const PICKER_STATE_KEY = '__hermesWebElementPicker'
 const SESSION_COOKIE_PERSIST_DELAY_MS = 750
 const SESSION_SHUTDOWN_TIMEOUT_MS = 2_000
 const HTML_PREVIEW_MAX_BYTES = 10 * 1024 * 1024
@@ -613,7 +617,45 @@ export class BrowserManager {
     }
   }
 
-  async cancelAnnotation(tabId: string): Promise<boolean> {
+    async pickElement(tabId: string): Promise<PickerResult> {
+        const record = this.requireTab(tabId)
+        this.visible = true
+        this.activeTabId = tabId
+        this.syncViews()
+        this.emitState()
+        try {
+          const { element: raw } = await record.view.webContents.executeJavaScriptInIsolatedWorld(PICKER_WORLD_ID, [{
+            code: PICKER_SCRIPT,
+          }], true) as { element: unknown; status: string }
+          if (raw && typeof raw === 'object') {
+            const el = raw as Record<string, unknown>
+            return {
+              status: 'selected',
+              tabId,
+              element: {
+                pageUrl: String(el.pageUrl || ''),
+                pageTitle: String(el.pageTitle || ''),
+                tagName: String(el.tagName || ''),
+                role: typeof el.role === 'string' ? el.role : undefined,
+                accessibleName: typeof el.accessibleName === 'string' ? el.accessibleName : undefined,
+                selector: typeof el.selector === 'string' ? el.selector : undefined,
+                xpath: typeof el.xpath === 'string' ? el.xpath : undefined,
+                attributes: typeof el.attributes === 'object' && el.attributes ? el.attributes as Record<string, string> : undefined,
+                style: typeof el.style === 'object' && el.style ? el.style as Record<string, string | undefined> : undefined,
+                rect: typeof el.rect === 'object' && el.rect ? el.rect as { x: number; y: number; width: number; height: number } : undefined,
+                text: typeof el.text === 'string' ? el.text : undefined,
+                nearbyText: typeof el.nearbyText === 'string' ? el.nearbyText : undefined,
+                htmlExcerpt: typeof el.htmlExcerpt === 'string' ? el.htmlExcerpt : undefined,
+              },
+            }
+          }
+          return { status: 'cancelled', tabId }
+        } catch {
+          return { status: 'cancelled', tabId }
+        }
+      }
+
+      async cancelAnnotation(tabId: string): Promise<boolean> {
     if (!this.activeAnnotationTabs.has(tabId)) return false
     const record = this.records.get(tabId)
     if (!record || record.view.webContents.isDestroyed()) {

@@ -929,7 +929,30 @@ function focusComposer() {
   nextTick(() => textareaRef.value?.focus())
 }
 
-defineExpose({ addFiles, focusComposer })
+/** Insert formatted element picker text at cursor position in the composer. */
+function insertBrowserPickText(text: string) {
+  const el = textareaRef.value
+  const currentValue = inputText.value
+  const selectionStart = el?.selectionStart ?? currentValue.length
+  const selectionEnd = el?.selectionEnd ?? selectionStart
+  const before = currentValue.slice(0, selectionStart)
+  const after = currentValue.slice(selectionEnd)
+  const prefix = before.trim() ? '\n\n' : ''
+  const suffix = after.trim() ? '\n\n' : ''
+  const nextValue = `${before}${prefix}${text}${suffix}${after}`
+  const nextCursorPosition = before.length + prefix.length + text.length
+
+  inputText.value = nextValue
+  nextTick(() => {
+    const textarea = textareaRef.value
+    if (!textarea) return
+    textarea.focus()
+    textarea.setSelectionRange(nextCursorPosition, nextCursorPosition)
+    autoSizeTextarea(textarea)
+  })
+}
+
+defineExpose({ addFiles, focusComposer, insertBrowserPickText })
 
 // --- Send ---
 

@@ -80,6 +80,35 @@ export interface DesktopBrowserSelection {
   screenshot: { mediaType: 'image/png' | 'image/jpeg'; data: string; width: number; height: number }
 }
 
+/** Rich metadata extracted from a user-picked page element, suitable for
+ *  composing an edit request to an agent (mirrors the Desktop `PickedElement`). */
+export interface DesktopPickedElement {
+  pageUrl: string
+  pageTitle: string
+  tagName: string
+  role?: string
+  accessibleName?: string
+  selector?: string
+  xpath?: string
+  attributes?: Record<string, string>
+  style?: {
+    color?: string
+    backgroundColor?: string
+    fontSize?: string
+    fontFamily?: string
+    fontWeight?: string
+    display?: string
+  }
+  rect?: { x: number; y: number; width: number; height: number }
+  text?: string
+  nearbyText?: string
+  htmlExcerpt?: string
+}
+
+export type DesktopPickerResult =
+  | { element: DesktopPickedElement; status: 'selected'; tabId: string }
+  | { status: 'cancelled'; tabId: string }
+
 export interface DesktopBrowserBridge {
   getState: () => Promise<DesktopBrowserState>
   setViewport: (bounds: DesktopWindowBounds, visible: boolean) => Promise<DesktopBrowserState>
@@ -111,7 +140,8 @@ export interface DesktopBrowserBridge {
   cancelDownload: (downloadId: string) => Promise<DesktopBrowserState>
   takeOver: (tabId: string) => Promise<boolean>
   annotate: (tabId: string, mode: 'element' | 'region') => Promise<DesktopBrowserSelection>
-  cancelAnnotation: (tabId: string) => Promise<boolean>
+    pickElement: (tabId: string) => Promise<DesktopPickerResult>
+    cancelAnnotation: (tabId: string) => Promise<boolean>
   updateAnnotationNote: (tabId: string, marker: number, note: string) => Promise<boolean>
   captureAnnotations: (tabId: string) => Promise<DesktopBrowserSelection['screenshot']>
   clearAnnotations: (tabId: string) => Promise<boolean>
@@ -151,7 +181,7 @@ const DESKTOP_BROWSER_METHODS: ReadonlyArray<keyof DesktopBrowserBridge> = [
   'getState', 'setViewport', 'createTab', 'closeTab', 'activateTab', 'navigate',
   'navigationAction', 'createProfile', 'chooseProfileRootDirectory', 'renameProfile', 'profileSwitchImpact',
   'switchProfile', 'updateProfile', 'deleteProfile', 'clearProfileData', 'cancelDownload',
-  'takeOver', 'annotate', 'cancelAnnotation', 'updateAnnotationNote',
+  'takeOver', 'annotate', 'pickElement', 'cancelAnnotation', 'updateAnnotationNote',
   'captureAnnotations', 'clearAnnotations',
   'onAnnotationRequest', 'onStateChange',
 ]
