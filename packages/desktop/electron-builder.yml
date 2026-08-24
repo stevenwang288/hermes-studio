@@ -37,6 +37,7 @@ extraResources:
       - "trayWindows.png"
       - "runtime-release.json"
       - "hermes-cookie-importer*"
+      - "earmark-bundle*"
   - from: "../.."
     to: "webui"
     filter:

@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, NInput, NPopover, NSelect, useDialog, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { desktopBridge, type DesktopBrowserDownload, type DesktopBrowserSelection, type DesktopBrowserState, type DesktopPickerResult, type DesktopPickedElement } from '@/utils/desktop-bridge'
+import { desktopBridge, type DesktopBrowserDownload, type DesktopBrowserSelection, type DesktopBrowserState } from '@/utils/desktop-bridge'
 import type { BrowserAnnotationSubmission } from '@/utils/browser-annotation-submit'
 
 const props = withDefaults(defineProps<{
@@ -82,8 +82,8 @@ let unmounting = false
 let annotationNoteUpdate: Promise<unknown> = Promise.resolve()
 let overlayCheckFrame = 0
 const overlayCheckTimers = new Map<number, number>()
-const isPicking = ref(false)
 const importingCookies = ref(false)
+const earmarkActive = ref(false)
 
 const activeTab = computed(() => state.value?.tabs.find(tab => tab.id === state.value?.activeTabId))
 const profileOptions = computed(() => state.value?.profiles.map(profile => ({ label: profile.name, value: profile.id })) || [])
@@ -346,67 +346,6 @@ async function sendAnnotations(): Promise<void> {
 
 
 /** Format a picked element into a structured text block for the composer. */
-function formatPickedElement(el: DesktopPickedElement): string {
-  const lines = [
-    '## Element',
-    `URL: ${el.pageUrl}`,
-    `Title: ${el.pageTitle || '(untitled)'}`,
-    `Tag: ${el.tagName}`,
-  ]
-  const add = (label: string, value?: string) => {
-    if (value?.trim()) lines.push(`${label}: ${value.trim()}`)
-  }
-  add('Role', el.role)
-  add('Accessible name', el.accessibleName)
-  add('Selector', el.selector)
-  add('XPath', el.xpath)
-  if (el.attributes && Object.keys(el.attributes).length > 0) {
-    add('Attributes',
-      Object.entries(el.attributes)
-        .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
-        .join(' '))
-  }
-  add('Color', el.style?.color)
-  add('Background', el.style?.backgroundColor)
-  const font = [el.style?.fontSize, el.style?.fontFamily].filter(Boolean).join(' ')
-  add('Font', font)
-  add('Font weight', el.style?.fontWeight)
-  add('Display', el.style?.display)
-  if (el.rect) {
-    lines.push(`Rect: x=${Math.round(el.rect.x)}, y=${Math.round(el.rect.y)}, width=${Math.round(el.rect.width)}, height=${Math.round(el.rect.height)}`)
-  }
-  const block = (label: string, value?: string, lang = '') => {
-    if (!value?.trim()) return
-    lines.push('', `${label}:`, '```' + lang, value.trim(), '```')
-  }
-  block('Text', el.text)
-  block('Nearby context', el.nearbyText)
-  block('HTML excerpt', el.htmlExcerpt, 'html')
-  return lines.join('\n')
-}
-
-async function togglePickElement(): Promise<void> {
-  const tabId = state.value?.activeTabId
-  if (!tabId || !bridge) return
-  if (isPicking.value) {
-    isPicking.value = false
-    return
-  }
-  isPicking.value = true
-  try {
-    const result = await bridge.pickElement(tabId) as DesktopPickerResult
-    if (result.status === 'selected' && result.element) {
-      const formatted = formatPickedElement(result.element)
-      window.dispatchEvent(new CustomEvent('hermes:browser-pick-element', { detail: { text: formatted } }))
-    }
-  } catch {
-    // pick cancelled or failed
-  } finally {
-    isPicking.value = false
-  }
-}
-
-
 async function importBrowserCookies() {
   const tabId = state.value?.activeTabId
   if (!tabId || !bridge) return
@@ -427,6 +366,18 @@ async function importBrowserCookies() {
     message.error(t('browser.cookiesImportError', { error: String(err) }))
   } finally {
     importingCookies.value = false
+  }
+}
+
+async function toggleEarmark() {
+  const tabId = state.value?.activeTabId
+  if (!tabId || !bridge) return
+  earmarkActive.value = !earmarkActive.value
+  try {
+    await bridge.toggleEarmark(tabId)
+  } catch (err) {
+    earmarkActive.value = false
+    console.error('[desktop-browser] toggleEarmark failed:', err)
   }
 }
 
@@ -573,19 +524,7 @@ onUnmounted(() => {
             <path d="M20 4v4h-4" />
           </svg>
         </button>
-        <button
-          type="button"
-          class="pick-element-btn"
-          :disabled="!activeTab || hasAnnotationSession"
-          :title="isPicking ? $t('browser.cancelPick') : $t('browser.pickElement')"
-          :aria-label="isPicking ? $t('browser.cancelPick') : $t('browser.pickElement')"
-          @click="togglePickElement"
-        >
-          <svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
-            <path d="M13 13l6 6" />
-          </svg>
-        </button>
+        
         <button
           type="button"
           class="import-cookies-btn"
@@ -596,6 +535,19 @@ onUnmounted(() => {
         >
           <svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <path d="M4 4h16v2H4V4zm0 4h16v2H4V8zm0 4h12v2H4v-2zm0 4h16v2H4v-2z" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="earmark-btn"
+          :disabled="!activeTab"
+          :title="$t('browser.earmarkToggle')"
+          :aria-label="$t('browser.earmarkToggle')"
+          @click="toggleEarmark"
+        >
+          <svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
           </svg>
         </button>
         <NInput v-model:value="address" size="small" :placeholder="t('browser.addressPlaceholder')" :disabled="busy || hasAnnotationSession" @keydown.enter="navigate" />

@@ -174,35 +174,7 @@ export interface BrowserSelection {
 
 /** Rich metadata extracted from a user-picked page element, suitable for
  *  composing an edit request to an agent. Modeled on the Hermes Agent
- *  `preview-element-picker` shape so the result reads like a DevTools snapshot. */
-export interface PickedElement {
-  pageUrl: string
-  pageTitle: string
-  tagName: string
-  role?: string
-  accessibleName?: string
-  selector?: string
-  xpath?: string
-  attributes?: Record<string, string>
-  style?: {
-    color?: string
-    backgroundColor?: string
-    fontSize?: string
-    fontFamily?: string
-    fontWeight?: string
-    display?: string
-  }
-  rect?: { x: number; y: number; width: number; height: number }
-  text?: string
-  nearbyText?: string
-  htmlExcerpt?: string
-}
-
-export type PickerResult =
-  | { element: PickedElement; status: 'selected'; tabId: string }
-  | { status: 'cancelled'; tabId: string }
-
-export interface BrowserProfileSwitchImpact {
+ */export interface BrowserProfileSwitchImpact {
   activeAgentRuns: number
   activeDownloads: number
   pendingAnnotations: number

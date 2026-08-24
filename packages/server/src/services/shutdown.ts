@@ -9,6 +9,7 @@ import { stopAppRelayClient } from './app-relay/client'
 import { closeGlobalEkkoAgent } from './ekko-agent/manager'
 import { stopChatWebhookDispatcher } from './hermes/chat-webhooks'
 import { shutdownSocialMessageRuntimes } from './social-messages'
+import { stopEarmark } from './earmark'
 
 const DEFAULT_SHUTDOWN_FORCE_EXIT_MS = 15_000
 const DEFAULT_DESKTOP_SHUTDOWN_FORCE_EXIT_MS = 15_000
@@ -77,6 +78,13 @@ export function createShutdownHandler(server: any, groupChatServer?: any, chatRu
         logger.info('Preview runtime stopped')
       } catch (err) {
         logger.warn(err, 'Failed to stop preview runtime (non-fatal)')
+      }
+
+      try {
+        await stopEarmark()
+        logger.info('Earmark broker stopped')
+      } catch (err) {
+        logger.warn(err, 'Failed to stop earmark broker (non-fatal)')
       }
 
       try {

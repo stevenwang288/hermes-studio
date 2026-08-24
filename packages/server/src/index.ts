@@ -45,6 +45,7 @@ import { getStaticCacheControl, SPA_ENTRY_CACHE_CONTROL } from './middleware/sta
 import { requireUserJwt, resolveUserProfile } from './middleware/user-auth'
 import { createCorsOriginResolver, securityHeaders } from './security'
 import type { ShutdownHandler } from './services/shutdown'
+import { startEarmark, stopEarmark } from './services/earmark'
 import { createRequestBodyParser } from './middleware/request-body-parser'
 import {
   migratePersistedPiRuntimeMcpConfigs,
@@ -445,7 +446,8 @@ export async function bootstrap() {
   })
 
   desktopShutdownHandler = bindShutdown(servers, groupChatServer, chatRunServer, agentBridgeManager)
-  startVersionCheck()
+  await startVersionCheck()
+  await startEarmark()
 }
 
 bootstrap().catch((error) => {

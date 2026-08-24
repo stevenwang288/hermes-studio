@@ -5,8 +5,8 @@ export default {
   browser: {
     title: 'ブラウザー', settings: 'ブラウザー設定', desktopOnly: '内蔵ブラウザーは Hermes Studio Desktop でのみ利用できます。', newTab: '新しいタブ',
     back: '戻る', forward: '進む', reload: '再読み込み', stop: '停止', addressPlaceholder: '検索またはアドレスを入力',
-    selectElement: '要素を選択',
-    pickElement: '要素を選択', cancelPick: '選択をキャンセル', selectRegion: '範囲を選択', annotationPlaceholder: 'Agent に確認または変更してほしい内容を入力…', selectionData: 'ブラウザー選択データ', annotationAdded: 'スクリーンショットをチャット入力欄に追加しました', annotationCount: '{count} 件の注釈', annotationLabel: '注釈 {index}', clearAnnotations: '注釈を消去', finishAnnotation: '完了',
+    selectElement: '要素を選択', selectRegion: '範囲を選択', annotationPlaceholder: 'Agent に確認または変更してほしい内容を入力…', selectionData: 'ブラウザー選択データ', annotationAdded: 'スクリーンショットをチャット入力欄に追加しました', annotationCount: '{count} 件の注釈', annotationLabel: '注釈 {index}', clearAnnotations: '注釈を消去', finishAnnotation: '完了',
+    earmarkToggle: 'earmarkアノテーション切り替え',
     agent: 'Agent', agentControlling: '{agent} がこのタブを操作中', agentWaiting: '{agent} が確認を待っています', takeOver: '引き継ぐ', tabCrashed: 'このタブはクラッシュしました。', recoverTab: '再読み込み', profiles: 'プロファイル', profileName: 'プロファイル名', addProfile: 'プロファイルを追加', currentProfile: '使用中', switchProfile: '切り替える', editProfile: 'プロファイルを編集',
     profileDirectory: 'プロファイルデータ', downloadDirectory: 'ダウンロード先', profileRootDirectory: 'プロファイルのルートフォルダー', chooseProfileRootDirectory: '空のフォルダーを選択', profileRootDirectoryHint: '空のフォルダーを選択してください。データは {data}、ダウンロードは {download} を使用します。', proxy: 'プロキシ', proxyMode: 'プロキシモード', proxyDirect: '直接接続', proxySystem: 'システムプロキシ', proxyCustom: 'カスタムプロキシ', proxyServer: 'プロキシサーバー', proxyServerPlaceholder: '例：http://127.0.0.1:7890 または socks5://127.0.0.1:1080',
     askBeforeDownload: '保存先を毎回確認', downloadConflictPolicy: '重複ファイル名', uniquifyDownloads: '一意の名前を作成', askOnConflict: '既存時に確認', downloads: 'ダウンロード', downloadStateProgressing: 'ダウンロード中', downloadStateCompleted: '完了', downloadStateCancelled: 'キャンセル済み', downloadStateInterrupted: '中断', downloadStateBlocked: 'ブロック済み', permissions: '権限', permissionsHint: 'リモートページの権限は既定で拒否され、監査用に表示されます。', blocked: 'ブロック済み',

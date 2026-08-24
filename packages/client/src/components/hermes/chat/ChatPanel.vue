@@ -421,12 +421,7 @@ function handleOpenDesktopBrowserPanelRequest() {
   showToolPanel.value = true;
 }
 
-function handleBrowserPickElement(event: Event): void {
-  const detail = (event as CustomEvent).detail as { text?: string } | undefined
-  const text = detail?.text
-  if (!text) return
-  chatInputRef.value?.insertBrowserPickText?.(text)
-}
+
 
 
 onMounted(() => {
@@ -438,7 +433,6 @@ onMounted(() => {
   window.addEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, handleOpenDesktopBrowserPanelRequest);
   window.addEventListener(OPEN_SUBAGENT_STREAM_EVENT, handleOpenSubagentStreamRequest);
   window.addEventListener("resize", handleToolPanelViewportResize);
-  window.addEventListener("hermes:browser-pick-element", handleBrowserPickElement);
   handleToolPanelViewportResize();
   if (profilesStore.profiles.length === 0) {
     void profilesStore.fetchProfiles();
@@ -486,7 +480,6 @@ onUnmounted(() => {
   window.removeEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, handleOpenDesktopBrowserPanelRequest);
   window.removeEventListener(OPEN_SUBAGENT_STREAM_EVENT, handleOpenSubagentStreamRequest);
   window.removeEventListener("resize", handleToolPanelViewportResize);
-  window.removeEventListener("hermes:browser-pick-element", handleBrowserPickElement);
   stopToolResize();
   sessionFadeAnimation?.cancel();
   if (filesStore.previewFile?.workspaceSessionId) filesStore.closePreview();

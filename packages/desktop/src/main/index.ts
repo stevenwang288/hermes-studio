@@ -1138,15 +1138,14 @@ ipcMain.handle('hermes-desktop:browser-annotate', (event, tabId?: unknown, mode?
   browserBroker?.revokeTab(String(tabId || ''))
   return manager.annotate(String(tabId || ''), mode)
 })
-ipcMain.handle('hermes-desktop:browser-pick-element', (event, tabId?: unknown) => {
-  const manager = browserForEvent(event)
-  browserBroker?.revokeTab(String(tabId || ''))
-  return manager.pickElement(String(tabId || ''))
-})
-
 ipcMain.handle('hermes-desktop:browser-import-cookies', (event, browser?: unknown) => {
   const manager = browserForEvent(event)
   return manager.importBrowserCookies((browser as 'chrome' | 'edge') || 'chrome')
+})
+
+ipcMain.handle('hermes-desktop:browser-toggle-earmark', (event, tabId?: unknown) => {
+  const manager = browserForEvent(event)
+  return manager.toggleEarmark(String(tabId || ''))
 })
 ipcMain.handle('hermes-desktop:browser-cancel-annotation', (event, tabId?: unknown) => browserForEvent(event).cancelAnnotation(String(tabId || '')))
 ipcMain.handle('hermes-desktop:browser-update-annotation-note', (event, tabId?: unknown, marker?: unknown, note?: unknown) => {
