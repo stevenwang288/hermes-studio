@@ -144,6 +144,8 @@ jobs:
           GOOS=${{ needs.validate.outputs.target_os == 'win32' && 'windows' || needs.validate.outputs.target_os == 'darwin' && 'darwin' || 'linux' }}
           GOARCH=${{ needs.validate.outputs.target_arch }}
           go build -o "build/${exe_name}" -ldflags="-s -w" .
+          mkdir -p ../build
+          cp "build/${exe_name}" "../build/${exe_name}"
           echo "Cookie importer built: build/${exe_name}"
 
       - name: Keep production web UI dependencies only
