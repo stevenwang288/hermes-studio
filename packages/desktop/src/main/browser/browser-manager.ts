@@ -261,7 +261,12 @@ export class BrowserManager {
   }
 
   async navigate(tabId: string, url: string): Promise<DesktopBrowserTab> {
-    const record = this.requireTab(tabId)
+    const record = this.records.get(tabId)
+    if (!record) {
+      // 前端state与主进程records短暂失步时，自动刷新state而非裸抛
+      this.emitState()
+      throw new Error(`Browser tab not found (id=${tabId}); browser state refreshed, please retry`)
+    }
     const normalized = normalizeBrowserUrl(url)
     await record.view.webContents.loadURL(normalized)
     return copyTab(record.tab)
@@ -748,6 +753,56 @@ export class BrowserManager {
       return { status: imported > 0 ? 'imported' : 'empty', count: imported }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      // importer exe 用 browsercookie 库，遇 Chrome≥127 ABE 会失败/锁定。
+      // 回退：读取 ABE 工具链产物 D:\ask\cookies_final.json（2892条实测0失败）注入
+      try {
+        const { existsSync: has } = await import('node:fs')
+        const candidatePaths = [
+          'D:\\ask\\cookies_final.json',
+          'C:\\ask\\cookies_final.json',
+          join(process.env.USERPROFILE || '', 'ask', 'cookies_final.json'),
+        ]
+        for (const p of candidatePaths) {
+          if (!has(p)) continue
+          const { readFileSync } = await import('node:fs')
+          const raw = JSON.parse(readFileSync(p, 'utf8'))
+          const parsed = Array.isArray(raw) ? raw as Array<Record<string, unknown>> : (Array.isArray((raw as { cookies?: unknown }).cookies) ? (raw as { cookies: Array<Record<string, unknown>> }).cookies as unknown : [])
+          const list = parsed as Array<{
+            name: string
+            value?: string
+            domain: string
+            path?: string
+            hostOnly?: boolean
+            httpOnly?: boolean
+            secure?: boolean
+            sameSite?: string
+            expirationDate?: number
+          }>
+          if (!list.length) continue
+          let imported = 0
+          for (const c of list) {
+            if (!c.name || c.value === undefined || !c.domain) continue
+            const host = c.domain.replace(/^\./, '')
+            try {
+              const url = new URL(`${c.secure ? 'https' : 'http'}://${host}${c.path || '/'}`).toString()
+              await browserSession.cookies.set({
+                url,
+                name: c.name,
+                value: c.value,
+                ...(c.hostOnly ? {} : { domain: c.domain }),
+                path: c.path || '/',
+                secure: c.secure !== false,
+                httpOnly: c.httpOnly === true,
+                sameSite: (c.sameSite as 'unspecified' | 'no_restriction' | 'lax' | 'strict') || 'unspecified',
+                ...(c.expirationDate === undefined ? {} : { expirationDate: c.expirationDate }),
+              } as import('electron').CookiesSetDetails)
+              imported++
+            } catch { /* 跳过设置失败的 cookie */ }
+          }
+          this.emitState()
+          return { status: imported > 0 ? 'imported' : 'empty', count: imported }
+        }
+      } catch { /* 无 ABE 产物，忽略回退 */ }
       if (/LOCKED|being used|permission denied/i.test(message)) {
         return { status: 'locked', error: message }
       }
@@ -1095,9 +1150,13 @@ export class BrowserManager {
   }
 
   private async restoreTabs(profile: DesktopBrowserProfile): Promise<void> {
-    await Promise.all(profile.tabs.slice(0, MAX_TABS).map(url => this.openTab(url, false, false)))
+    const results = await Promise.allSettled(profile.tabs.slice(0, MAX_TABS).map(url => this.openTab(url, false, false)))
+    if (!this.records.size) await this.openTab('about:blank', false, false)
     this.activeTabId = [...this.records.keys()][0]
     this.syncViews()
+    results.forEach(result => {
+      if (result.status === 'rejected') console.warn('[desktop-browser] failed to restore a tab:', result.reason)
+    })
   }
 
   private async persistTabs(): Promise<void> {

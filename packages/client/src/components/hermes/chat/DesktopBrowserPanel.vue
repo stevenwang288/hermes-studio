@@ -114,7 +114,7 @@ const annotationAnchorStyle = computed(() => {
   }
 })
 
-watch(() => activeTab?.url, value => { address.value = value || '' }, { immediate: true })
+watch(() => activeTab.value?.url, value => { address.value = value || '' }, { immediate: true })
 watch(externalOverlayOpen, () => { void nextTick(syncViewport) })
 watch(() => props.visible, () => { void nextTick(syncViewport) })
 
@@ -142,13 +142,13 @@ async function run(action: () => Promise<unknown>): Promise<void> {
 }
 
 function navigate(): void {
-  const tab = activeTab
+  const tab = activeTab.value
   if (!tab || !address.value.trim()) return
   void run(() => bridge!.navigate(tab.id, address.value.trim()))
 }
 
 function navigationAction(action: 'back' | 'forward' | 'reload' | 'stop'): void {
-  if (activeTab) void run(() => bridge!.navigationAction(activeTab!.id, action))
+  if (activeTab.value) void run(() => bridge!.navigationAction(activeTab.value!.id, action))
 }
 
 function resetAnnotationSession(): void {
@@ -234,11 +234,11 @@ function activateTab(tabId: string): void {
 }
 
 function takeOver(): void {
-  if (activeTab) void run(() => bridge!.takeOver(activeTab!.id))
+  if (activeTab.value) void run(() => bridge!.takeOver(activeTab.value!.id))
 }
 
 function annotate(mode: 'element' | 'region', tabId?: string): void {
-  const tab = tabId ? state.value?.tabs.find(item => item.id === tabId) : activeTab
+  const tab = tabId ? (state.value?.tabs.find(item => item.id === tabId) ?? null) : activeTab.value
   if (!tab) return
   if (annotationTabId.value && annotationTabId.value !== tab.id) return
   void run(async () => {

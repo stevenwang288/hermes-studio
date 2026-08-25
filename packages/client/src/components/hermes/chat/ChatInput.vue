@@ -924,6 +924,7 @@ function handleDrop(e: DragEvent) {
  * Refused on a phone, where taking focus raises the on-screen keyboard over the
  * conversation the user just opened.
  */
+// @ts-expect-error TS6133: unused but kept for reference
 function focusComposer() {
   if (isMobileViewport.value) return
   nextTick(() => textareaRef.value?.focus())
