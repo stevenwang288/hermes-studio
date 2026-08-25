@@ -859,7 +859,12 @@ export class BrowserManager {
       if (!bundlePath) throw new Error('earmark bundle not found')
 
       const bundle = readFileSync(bundlePath, 'utf8')
-      await record.view.webContents.executeJavaScript(bundle, true)
+      // bundle 本身只在末尾留了一个'字符串字面量'，不会自执行 createEarmark，
+      // 必须是注入后主动调用，且 endpoint 需要加引号否则 http:// 被当成注释
+      await record.view.webContents.executeJavaScript(
+        bundle + `\n;(() => { Earmark.createEarmark({ endpoint: "http://127.0.0.1:7331" }); })();`,
+        true,
+      )
       this.earmarkTabs.add(tabId)
       this.emitState()
       return true
