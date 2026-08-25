@@ -956,6 +956,18 @@ export class BrowserManager {
       if (record.htmlPreviewTitle && details.url.startsWith('data:text/html')) return
       if (!isAllowedBrowserRequest(details.url)) details.preventDefault()
     })
+    // 伪装指纹：把 Electron UA 替换成真实 Chrome UA + 隐藏 navigator.webdriver
+    contents.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+    )
+    const hideWebdriver = () => {
+      if (contents.isDestroyed()) return
+      contents.executeJavaScript(
+        `Object.defineProperty(Navigator.prototype, 'webdriver', { get: () => undefined });\n         window.chrome?.runtime?.id;`
+      ).catch(() => { /* 页面可能未就绪，忽略 */ })
+    }
+    contents.on('dom-ready', hideWebdriver)
+    contents.on('did-navigate', hideWebdriver)
     contents.on('did-start-loading', () => { tab.loading = true; this.automation.invalidate(id); this.emitState() })
     contents.on('did-stop-loading', () => { tab.loading = false; this.refreshTab(record); this.emitState() })
     contents.on('did-fail-load', () => { tab.loading = false; this.refreshTab(record); this.emitState() })
