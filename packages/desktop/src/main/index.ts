@@ -42,7 +42,7 @@ import type { BrowserBounds } from './browser/browser-types'
 const PORT = Number(process.env.HERMES_DESKTOP_PORT) || 8748
 const START_HIDDEN = process.argv.includes('--hidden')
 const QUIT_EXISTING = process.argv.includes('--quit')
-const APP_USER_MODEL_ID = 'com.hermeswebui.studio'
+const APP_USER_MODEL_ID = 'com.hermeswebui.studio.self'
 const PET_WINDOW_DEFAULT_WIDTH = 300
 const PET_WINDOW_DEFAULT_HEIGHT = 320
 const PET_WINDOW_MIN_SIZE = 72
@@ -455,7 +455,7 @@ function createTray() {
         quality: 'best',
       })
   tray = new Tray(icon)
-  tray.setToolTip('Hermes Studio')
+  tray.setToolTip('Hermes Studio (自用版)')
   tray.on('click', () => {
     showMainWindow()
     updateTrayMenu()
@@ -533,7 +533,7 @@ async function createWindow(): Promise<void> {
     height: 820,
     minWidth: 769,
     minHeight: 600,
-    title: 'Hermes Studio',
+    title: 'Hermes Studio (自用版)',
     backgroundColor: '#1a1a1a',
     autoHideMenuBar: true,
     show: false,
@@ -630,7 +630,7 @@ async function openChatWindow(sessionIdInput: unknown, profileInput?: unknown): 
     height: 760,
     minWidth: 620,
     minHeight: 480,
-    title: 'Hermes Studio',
+    title: 'Hermes Studio (自用版)',
     backgroundColor: '#1a1a1a',
     autoHideMenuBar: true,
     show: false,
@@ -867,7 +867,7 @@ function runtimeSourceHtml(errorMessage?: string): string {
     button{min-height:78px}
   }
 </style></head><body><main class="surface"><div class="wrap">
-<div class="brand">${logoUrl ? `<img class="mark" src="${logoUrl}" alt="Hermes Studio">` : ''}<h1>Hermes Studio</h1></div>
+<div class="brand">${logoUrl ? `<img class="mark" src="${logoUrl}" alt="Hermes Studio (自用版)">` : ''}<h1>Hermes Studio</h1></div>
 <p class="label">${escapeHtml(t('desktop.selectRuntimeSource'))}</p>
 ${errorBlock}
 <div class="actions">
@@ -1224,7 +1224,7 @@ ipcMain.handle('hermes-desktop:notify-completion', (_event, payload?: { title?: 
 
   const title = typeof payload?.title === 'string' && payload.title.trim()
     ? payload.title.trim()
-    : 'Hermes Studio'
+    : 'Hermes Studio (自用版)'
   const body = typeof payload?.body === 'string' ? payload.body.trim().slice(0, 240) : ''
   const icon = resolveNotificationIcon(payload?.icon)
   const clickUrl = safeNotificationClickUrl(payload?.clickUrl)

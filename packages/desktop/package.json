@@ -1,6 +1,6 @@
 {
-  "name": "hermes-studio",
-  "version": "0.6.47-fork.2",
+  "name": "hermes-studio-self",
+  "version": "0.6.47-fork.3",
   "description": "Hermes Studio desktop distribution with bundled Python runtime and hermes-agent",
   "homepage": "https://hermes-studio.ai",
   "author": {
@@ -29,7 +29,7 @@
     "dist:mac": "npm run build && node scripts/electron-builder.mjs --mac",
     "dist:win": "npm run build && node scripts/electron-builder.mjs --win",
     "dist:linux": "npm run build && node scripts/electron-builder.mjs --linux",
-    "dev:isolated": "set HERMES_WEB_UI_HOME=D:\\tmp\\hermes-dev && set HERMES_HOME=D:\\tmp\\hermes-dev && npm run build:main && electron ."
+    "dev:isolated": "npm run build:main && set HERMES_HOME=%USERPROFILE%\\.hermes&& node scripts/dev-self.cjs"
   },
   "devDependencies": {
     "@types/node": "^24.12.2",
