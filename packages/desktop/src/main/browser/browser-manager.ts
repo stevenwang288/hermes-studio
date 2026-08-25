@@ -958,7 +958,7 @@ export class BrowserManager {
     })
     // 伪装指纹：把 Electron UA 替换成真实 Chrome UA + 隐藏 navigator.webdriver
     contents.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36'
     )
     const hideWebdriver = () => {
       if (contents.isDestroyed()) return
