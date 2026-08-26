@@ -85,7 +85,7 @@ function loadCachedTheme(userId: number | null): UserThemeSettings {
 }
 
 const brightness = ref<BrightnessMode>(
-  (localStorage.getItem(BRIGHTNESS_KEY) as BrightnessMode) || 'system',
+  (localStorage.getItem(BRIGHTNESS_KEY) as BrightnessMode) || 'dark',
 )
 const style = ref<ThemeStyle>(
   (localStorage.getItem(STYLE_KEY) as ThemeStyle) || 'ink',
