@@ -12,6 +12,25 @@
 
 ---
 
+## 同步记录（2026-08-26）
+
+- 上游已更新到 `a5134053`（5 个新提交，从 `cd4c1347` 到 `a5134053`）
+- **merge 上游**：`git merge upstream/main`，**2 个文件冲突**，全部解决
+- **上游新功能**（5 个提交）：
+  - `a5134053` 保留 coding agent 停止后的上下文 (#2735)
+  - `b37c76df` 改进附件传输和媒体预览 (#2732) — 新增视频帧提取、群聊分块上传、App Relay 下载会话
+  - `be0681f3` 微信通知绑定限制说明 (#2731)
+  - `8dc6d193` 修复 coding agent 运行间 tool calls 丢失 (#2730)
+  - `cd4c1347` 隐藏全局 coding agent reasoning effort 控件 (#2728)
+- **冲突解决明细**：
+  - `docs/openapi.json` → 取上游版本
+  - `ChatInput.vue` → 取上游 `async handleSend` + 视频帧附件等待逻辑，保留 fork 的 ESC/Ctrl+Enter 队列放行（两者不重叠，自动合并成功）
+- **编译验证**：✅ vite build + tsc server + build-server 全部通过
+- **版本**：0.6.47-fork.5
+- **本 fork 改动**：消息队列 + 字体缩放 + earmark + cookie-import + 壁纸，全部保留
+
+---
+
 ## 同步记录（2026-08-25）
 
 - 上游已更新到 `8a194dc7`（v0.6.47 release + 1 个 hotfix，41 个新提交，从 `c8a271aa` 到 `8a194dc7`）
