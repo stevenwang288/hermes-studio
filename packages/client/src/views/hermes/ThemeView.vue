@@ -11,6 +11,7 @@ import {
   type BrightnessMode,
   type ThemeStyle,
 } from '@/composables/useTheme'
+import { BUILT_IN_WALLPAPERS, type BuiltInWallpaper } from '@/data/built-in-wallpapers'
 
 const MAX_BACKGROUND_BYTES = 10 * 1024 * 1024
 const SUPPORTED_BACKGROUND_TYPES = new Set([
@@ -60,6 +61,26 @@ const resolvedAccentColor = computed(() =>
 const previewStyle = computed(() => ({
   backgroundImage: backgroundImageUrl.value ? `url("${backgroundImageUrl.value}")` : undefined,
 }))
+
+const builtInWallpapers = BUILT_IN_WALLPAPERS
+const activeBuiltInWallpaper = ref<string | null>(null)
+
+function applyBuiltInWallpaper(wp: BuiltInWallpaper) {
+  if (activeBuiltInWallpaper.value === wp.id) {
+    // 再次点击 = 取消
+    activeBuiltInWallpaper.value = null
+    document.documentElement.style.removeProperty('--app-background-image')
+    document.documentElement.classList.remove('theme-has-custom-background')
+    return
+  }
+  activeBuiltInWallpaper.value = wp.id
+  // 清除用户上传的背景图（如果有）
+  if (backgroundImageUrl.value) {
+    document.documentElement.style.setProperty('--app-background-image', 'none')
+  }
+  document.documentElement.style.setProperty('--app-background-image', wp.css)
+  document.documentElement.classList.add('theme-has-custom-background')
+}
 
 async function savePatch(
   patch: Parameters<typeof saveThemeCustomization>[0],
@@ -297,6 +318,29 @@ async function handleReset() {
         <p class="background-note">{{ t('theme.backgroundNote') }}</p>
       </section>
 
+      <section class="theme-card">
+        <div class="section-heading">
+          <div>
+            <h3>{{ t('theme.builtInWallpapers') }}</h3>
+            <p>{{ t('theme.builtInWallpapersHint') }}</p>
+          </div>
+        </div>
+        <div class="wallpaper-grid">
+          <button
+            v-for="wp in builtInWallpapers"
+            :key="wp.id"
+            type="button"
+            class="wallpaper-card"
+            :class="{ active: activeBuiltInWallpaper === wp.id }"
+            :style="{ background: wp.css }"
+            :title="wp.name"
+            @click="applyBuiltInWallpaper(wp)"
+          >
+            <span class="wallpaper-label">{{ wp.name }}</span>
+          </button>
+        </div>
+      </section>
+
       <section class="theme-preview">
         <div class="preview-copy">
           <span class="preview-kicker">{{ t('theme.preview') }}</span>
@@ -531,5 +575,45 @@ async function handleReset() {
   .background-preview {
     min-height: 170px;
   }
+}
+
+.wallpaper-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.wallpaper-card {
+  position: relative;
+  height: 90px;
+  border: 2px solid transparent;
+  border-radius: $radius-md;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.15s, transform 0.15s;
+  background-size: cover;
+  background-position: center;
+}
+
+.wallpaper-card:hover {
+  transform: scale(1.03);
+}
+
+.wallpaper-card.active {
+  border-color: $accent-primary;
+}
+
+.wallpaper-label {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  text-align: center;
 }
 </style>

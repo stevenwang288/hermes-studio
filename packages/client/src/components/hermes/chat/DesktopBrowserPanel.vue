@@ -82,7 +82,7 @@ let unmounting = false
 let annotationNoteUpdate: Promise<unknown> = Promise.resolve()
 let overlayCheckFrame = 0
 const overlayCheckTimers = new Map<number, number>()
-const importingCookies = ref(false)
+const syncingChrome = ref(false)
 const earmarkActive = ref(false)
 
 const activeTab = computed(() => state.value?.tabs.find(tab => tab.id === state.value?.activeTabId))
@@ -345,36 +345,34 @@ async function sendAnnotations(): Promise<void> {
 }
 
 
-/** Format a picked element into a structured text block for the composer. */
-async function importBrowserCookies() {
-  const tabId = state.value?.activeTabId
-  if (!tabId || !bridge) return
-  importingCookies.value = true
+async function syncChrome() {
+  if (!bridge) return
+  syncingChrome.value = true
   try {
-    const result = await bridge.importBrowserCookies('chrome')
-    if (result.status === 'imported') {
-      message.success(t('browser.cookiesImported', { count: result.count || 0 }))
-    } else if (result.status === 'locked') {
-      message.warning(t('browser.cookiesImportLocked'))
-    } else if (result.status === 'empty') {
-      message.info(t('browser.cookiesImportEmpty'))
-    } else if (result.status === 'error') {
-      message.error(t('browser.cookiesImportError', { error: result.error || '' }))
+    const result = await bridge.syncChromeProfile()
+    if (result.status === 'synced') {
+      message.success(t('browser.syncChromeSuccess', { count: result.cookieCount || 0 }))
+    } else if (result.status === 'chrome-running') {
+      message.warning(t('browser.syncChromeRunning'))
+    } else if (result.status === 'not-found') {
+      message.warning(t('browser.syncChromeNotFound'))
+    } else {
+      message.error(t('browser.syncChromeError', { error: result.error || '' }))
     }
   } catch (err) {
-    console.error('[desktop-browser] importBrowserCookies failed:', err)
-    message.error(t('browser.cookiesImportError', { error: String(err) }))
+    message.error(t('browser.syncChromeError', { error: String(err) }))
   } finally {
-    importingCookies.value = false
+    syncingChrome.value = false
   }
 }
 
 async function toggleEarmark() {
   const tabId = state.value?.activeTabId
   if (!tabId || !bridge) return
-  earmarkActive.value = !earmarkActive.value
   try {
-    await bridge.toggleEarmark(tabId)
+    const result = await bridge.toggleEarmark(tabId)
+    // 用 IPC 返回值同步 UI 状态：true=刚开启, false=刚关闭
+    earmarkActive.value = result
   } catch (err) {
     earmarkActive.value = false
     console.error('[desktop-browser] toggleEarmark failed:', err)
@@ -527,14 +525,18 @@ onUnmounted(() => {
         
         <button
           type="button"
-          class="import-cookies-btn"
-          :disabled="!activeTab || importingCookies"
-          :title="$t('browser.importCookies')"
-          :aria-label="$t('browser.importCookies')"
-          @click="importBrowserCookies"
+          class="sync-chrome-btn"
+          :disabled="syncingChrome"
+          :title="$t('browser.syncChromeHint')"
+          :aria-label="$t('browser.syncChrome')"
+          @click="syncChrome"
         >
-          <svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="M4 4h16v2H4V4zm0 4h16v2H4V8zm0 4h12v2H4v-2zm0 4h16v2H4v-2z" />
+          <svg v-if="syncingChrome" class="toolbar-icon toolbar-icon-spin" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+            <path d="M12 6a6 6 0 1 0 0 12 6 6 0 0 0 0-12z" fill="none" stroke="currentColor" stroke-width="2" />
+          </svg>
+          <svg v-else class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93C7.05 19.44 4 16.08 4 12c0-.61.08-1.21.21-1.78L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41C17.93 5.78 20 8.65 20 12c0 2.08-.81 3.98-2.1 5.39z" />
           </svg>
         </button>
         <button
@@ -672,4 +674,6 @@ onUnmounted(() => {
 .annotation-popover :deep(.annotation-note-input .n-input__textarea-el::placeholder) { color: #9ca3af !important; }
 .annotation-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .unavailable { padding: 40px; text-align: center; color: var(--text-color-3); }
+.toolbar-icon-spin { animation: toolbar-spin 0.8s linear infinite; }
+@keyframes toolbar-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 </style>

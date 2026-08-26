@@ -88,6 +88,13 @@ export interface DesktopCookieImportResult {
   error?: string
 }
 
+export interface DesktopChromeSyncResult {
+  status: 'synced' | 'chrome-running' | 'not-found' | 'error'
+  error?: string
+  profileId?: string
+  cookieCount?: number
+}
+
 export interface DesktopBrowserBridge {
   getState: () => Promise<DesktopBrowserState>
   setViewport: (bounds: DesktopWindowBounds, visible: boolean) => Promise<DesktopBrowserState>
@@ -120,6 +127,7 @@ export interface DesktopBrowserBridge {
   takeOver: (tabId: string) => Promise<boolean>
   annotate: (tabId: string, mode: 'element' | 'region') => Promise<DesktopBrowserSelection>
     importBrowserCookies: (browser: 'chrome' | 'edge') => Promise<DesktopCookieImportResult>
+    syncChromeProfile: () => Promise<DesktopChromeSyncResult>
     toggleEarmark: (tabId: string) => Promise<boolean>
     cancelAnnotation: (tabId: string) => Promise<boolean>
   updateAnnotationNote: (tabId: string, marker: number, note: string) => Promise<boolean>
@@ -163,7 +171,7 @@ const DESKTOP_BROWSER_METHODS: ReadonlyArray<keyof DesktopBrowserBridge> = [
   'getState', 'setViewport', 'createTab', 'closeTab', 'activateTab', 'navigate',
   'navigationAction', 'createProfile', 'chooseProfileRootDirectory', 'renameProfile', 'profileSwitchImpact',
   'switchProfile', 'updateProfile', 'deleteProfile', 'clearProfileData', 'cancelDownload',
-  'takeOver', 'annotate', 'importBrowserCookies', 'toggleEarmark', 'cancelAnnotation', 'updateAnnotationNote',
+  'takeOver', 'annotate', 'importBrowserCookies', 'syncChromeProfile', 'toggleEarmark', 'cancelAnnotation', 'updateAnnotationNote',
   'captureAnnotations', 'clearAnnotations',
   'onAnnotationRequest', 'onStateChange',
 ]

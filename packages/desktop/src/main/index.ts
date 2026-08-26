@@ -51,7 +51,7 @@ const PET_WINDOW_REFRESH_CHANNEL = 'hermes-desktop:pet-window-refresh'
 const WINDOW_STATE_CHANGE_CHANNEL = 'hermes-desktop:window-state-change'
 const BROWSER_STATE_CHANGE_CHANNEL = 'hermes-desktop:browser-state-change'
 const BROWSER_ANNOTATION_REQUEST_CHANNEL = 'hermes-desktop:browser-annotation-request'
-const DESKTOP_DISABLED_CHROMIUM_FEATURES = ['CompressionDictionaryTransport', 'CompressionDictionaryTransportBackend']
+const DESKTOP_DISABLED_CHROMIUM_FEATURES = ['CompressionDictionaryTransport', 'CompressionDictionaryTransportBackend', 'UserAgentClientHint', 'GreaseUACH']
 type WindowControlAction = 'minimize' | 'toggle-maximize' | 'close'
 type DesktopWindowBounds = { x: number; y: number; width: number; height: number }
 
@@ -77,6 +77,9 @@ const existingDisabledFeatures = app.commandLine.getSwitchValue('disable-feature
   .map(value => value.trim())
   .filter(Boolean)
 app.commandLine.appendSwitch('disable-features', [...new Set([...existingDisabledFeatures, ...DESKTOP_DISABLED_CHROMIUM_FEATURES])].join(','))
+
+// 伪装 sec-ch-ua brand list：让 B站等风控认为这是真实 Chrome 而非 Electron/Chromium
+// --user-agent 和 --user-agent-product 都要改，Chromium 会从 UA 提取版本号写进 sec-ch-ua
 
 if (process.platform === 'win32') {
   app.setAppUserModelId(APP_USER_MODEL_ID)
@@ -455,7 +458,7 @@ function createTray() {
         quality: 'best',
       })
   tray = new Tray(icon)
-  tray.setToolTip('Hermes Studio (自用版)')
+  tray.setToolTip('爱马仕')
   tray.on('click', () => {
     showMainWindow()
     updateTrayMenu()
@@ -533,7 +536,7 @@ async function createWindow(): Promise<void> {
     height: 820,
     minWidth: 769,
     minHeight: 600,
-    title: 'Hermes Studio (自用版)',
+    title: '爱马仕',
     backgroundColor: '#1a1a1a',
     autoHideMenuBar: true,
     show: false,
@@ -630,7 +633,7 @@ async function openChatWindow(sessionIdInput: unknown, profileInput?: unknown): 
     height: 760,
     minWidth: 620,
     minHeight: 480,
-    title: 'Hermes Studio (自用版)',
+    title: '爱马仕',
     backgroundColor: '#1a1a1a',
     autoHideMenuBar: true,
     show: false,
@@ -758,7 +761,7 @@ function installMicrophonePermissionHandler() {
 function splashHtml(label = t('desktop.startingLocalServices')): string {
   const startingLabel = escapeHtml(label)
   const pageBackground = process.platform === 'win32' ? 'transparent' : '#1a1a1a'
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Hermes Studio</title>
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>爱马仕</title>
 <style>
   html,body{margin:0;height:100%;background:${pageBackground};color:#e5e5e5;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif;-webkit-app-region:drag;}
   .surface{height:100%;background:#1a1a1a}
@@ -775,7 +778,7 @@ function splashHtml(label = t('desktop.startingLocalServices')): string {
   @keyframes progress{0%{transform:translateX(-110%)}100%{transform:translateX(360%)}}
   h1{font-weight:500;margin:0;font-size:18px}
 </style></head><body><main class="surface"><div class="wrap">
-<h1>Hermes Studio</h1>
+<h1>爱马仕</h1>
 <div class="row"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
 <div id="label" class="label">${startingLabel}</div>
 <div class="progress"><div id="bar" class="bar indeterminate"></div></div>
@@ -839,7 +842,7 @@ function runtimeSourceHtml(errorMessage?: string): string {
         <pre>${safeError}</pre>
        </section>`
     : ''
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Hermes Studio</title>
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>爱马仕</title>
 <style>
   :root{color-scheme:dark}
   *{box-sizing:border-box}
@@ -867,7 +870,7 @@ function runtimeSourceHtml(errorMessage?: string): string {
     button{min-height:78px}
   }
 </style></head><body><main class="surface"><div class="wrap">
-<div class="brand">${logoUrl ? `<img class="mark" src="${logoUrl}" alt="Hermes Studio (自用版)">` : ''}<h1>Hermes Studio</h1></div>
+<div class="brand">${logoUrl ? `<img class="mark" src="${logoUrl}" alt="爱马仕">` : ''}<h1>爱马仕</h1></div>
 <p class="label">${escapeHtml(t('desktop.selectRuntimeSource'))}</p>
 ${errorBlock}
 <div class="actions">
@@ -955,7 +958,7 @@ async function installPackagedCommandShims(): Promise<void> {
   for (const result of results) {
     if (result.status === 'rejected') {
       console.warn(
-        `[cli-shim] failed to install Hermes Studio command: `
+        `[cli-shim] failed to install 爱马仕 command: `
         + `${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
       )
       continue
@@ -1143,6 +1146,12 @@ ipcMain.handle('hermes-desktop:browser-import-cookies', (event, browser?: unknow
   return manager.importBrowserCookies((browser as 'chrome' | 'edge') || 'chrome')
 })
 
+ipcMain.handle('hermes-desktop:browser-sync-chrome-profile', event => {
+  const manager = browserForEvent(event)
+  browserBroker?.revokeAll()
+  return manager.syncChromeProfile()
+})
+
 ipcMain.handle('hermes-desktop:browser-toggle-earmark', (event, tabId?: unknown) => {
   const manager = browserForEvent(event)
   return manager.toggleEarmark(String(tabId || ''))
@@ -1224,7 +1233,7 @@ ipcMain.handle('hermes-desktop:notify-completion', (_event, payload?: { title?: 
 
   const title = typeof payload?.title === 'string' && payload.title.trim()
     ? payload.title.trim()
-    : 'Hermes Studio (自用版)'
+    : '爱马仕'
   const body = typeof payload?.body === 'string' ? payload.body.trim().slice(0, 240) : ''
   const icon = resolveNotificationIcon(payload?.icon)
   const clickUrl = safeNotificationClickUrl(payload?.clickUrl)

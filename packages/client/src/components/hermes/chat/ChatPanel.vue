@@ -196,7 +196,7 @@ function toolPanelMaxWidth() {
   if (typeof window === "undefined") return 1180;
   if (isMobile.value) return window.innerWidth;
   const available = chatContentWrapperRef.value?.clientWidth || window.innerWidth;
-  return Math.max(320, Math.min(Math.floor(available * 0.88), available - 480));
+  return Math.max(320, Math.min(Math.floor(available * 0.88), available - 120));
 }
 
 function clampToolPanelWidth(width: number) {

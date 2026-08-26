@@ -195,7 +195,7 @@ export class BrowserProfileStore {
         rootPath: join(this.root, 'profiles', id),
         sessionPath: join(this.root, 'profiles', id, 'data'),
         downloadPath: join(this.root, 'profiles', id, 'download'),
-        proxyMode: 'direct',
+      proxyMode: 'system',
         proxyRules: '',
         askBeforeDownload: true,
         downloadConflictPolicy: 'uniquify',
@@ -254,8 +254,44 @@ export class BrowserProfileStore {
         throw new Error('Browser profile directories cannot overlap')
       }
     }
-    if ((await readdir(normalized)).length > 0) throw new Error('The selected profile directory must be empty')
 
     return normalized
+  }
+
+  /**
+   * 为 chrome-mirror 创建 profile，跳过"目录必须为空"的校验，
+   * 因为 chrome-mirror 目录在 syncChromeProfile 复制后已经有内容。
+   */
+  async createChromeMirrorProfile(input: {
+    name: string
+    rootPath: string
+    sessionPath: string
+    downloadPath: string
+  }): Promise<DesktopBrowserProfile> {
+    const document = this.requireDocument()
+    const profileName = safeName(input.name)
+    const rootPath = resolve(input.rootPath)
+    // 跳过 validateProfileRoot，因为我们知道这个目录是安全的（在 browserRoot 下的 chrome-mirror/）
+    const id = randomUUID()
+    const createdAt = now()
+    const profile: DesktopBrowserProfile = {
+      id,
+      name: profileName,
+      rootPath,
+      sessionPath: resolve(input.sessionPath),
+      downloadPath: resolve(input.downloadPath),
+      proxyMode: 'system',
+      proxyRules: '',
+      askBeforeDownload: true,
+      downloadConflictPolicy: 'uniquify',
+      createdAt,
+      lastUsedAt: createdAt,
+      tabs: ['about:blank'],
+    }
+    await mkdir(profile.sessionPath, { recursive: true, mode: 0o700 })
+    await mkdir(profile.downloadPath, { recursive: true, mode: 0o700 })
+    document.profiles.push(profile)
+    await this.persist()
+    return { ...profile, tabs: [...profile.tabs] }
   }
 }

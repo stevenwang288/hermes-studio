@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     takeOver: (tabId: string): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:browser-take-over', tabId),
     annotate: (tabId: string, mode: 'element' | 'region'): Promise<BrowserSelection> => ipcRenderer.invoke('hermes-desktop:browser-annotate', tabId, mode),
         importBrowserCookies: (browser: 'chrome' | 'edge'): Promise<{ status: string; count?: number; error?: string }> => ipcRenderer.invoke('hermes-desktop:browser-import-cookies', browser),
+        syncChromeProfile: (): Promise<{ status: string; error?: string; profileId?: string; cookieCount?: number }> => ipcRenderer.invoke('hermes-desktop:browser-sync-chrome-profile'),
     toggleEarmark: (tabId: string): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:browser-toggle-earmark', tabId),
         cancelAnnotation: (tabId: string): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:browser-cancel-annotation', tabId),
     updateAnnotationNote: (tabId: string, marker: number, note: string): Promise<boolean> => ipcRenderer.invoke('hermes-desktop:browser-update-annotation-note', tabId, marker, note),

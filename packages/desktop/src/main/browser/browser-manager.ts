@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
+import { cp, mkdir, readdir, rm, stat } from 'node:fs/promises'
 import { basename, dirname, extname, join, resolve } from 'node:path'
+import { homedir } from 'node:os'
 import {
   BrowserWindow,
   app,
+  clipboard,
   dialog,
   Menu,
   session,
@@ -680,14 +683,100 @@ export class BrowserManager {
   }> {
     const profile = this.profileStore.active()
     const browserSession = this.profileSession(profile)
+    const { join } = await import('node:path')
 
-    // 定位打包好的 cookie-importer 可执行文件
+    const sameSiteMap = (raw: string | undefined, secure: boolean): 'unspecified' | 'no_restriction' | 'lax' | 'strict' => {
+      const v = String(raw || '').toLowerCase()
+      if (v === 'no_restriction' || v === 'none') return 'no_restriction'
+      if (v === 'lax') return 'lax'
+      if (v === 'strict') return 'strict'
+      // unspecified：secure cookie 用 no_restriction（SameSite=None; Secure）
+      // 非 secure cookie 用 lax（no_restriction 要求 secure=true，否则注入失败）
+      return secure ? 'no_restriction' : 'lax'
+    }
+
+    const injectCookieList = async (
+      list: Array<{
+        name: string
+        value?: string
+        domain: string
+        path?: string
+        hostOnly?: boolean
+        httpOnly?: boolean
+        secure?: boolean
+        sameSite?: string
+        expirationDate?: number
+      }>,
+      domainFilter?: string[],
+    ): Promise<number> => {
+      let imported = 0
+      const now = Date.now() / 1000
+      for (const c of list) {
+        if (!c.name || c.value === undefined || !c.domain) continue
+        // 跳过已过期的 cookie
+        if (c.expirationDate !== undefined && c.expirationDate > 0 && c.expirationDate < now) continue
+        if (domainFilter && domainFilter.length > 0) {
+          const domainLower = c.domain.toLowerCase().replace(/^\./, '')
+          const matched = domainFilter.some(f => domainLower === f || domainLower.endsWith(`.${f}`))
+          if (!matched) continue
+        }
+        const host = c.domain.replace(/^\./, '')
+        try {
+          const url = new URL(`${c.secure ? 'https' : 'http'}://${host}${c.path || '/'}`).toString()
+          await browserSession.cookies.set({
+            url,
+            name: c.name,
+            value: c.value,
+            ...(c.hostOnly ? {} : { domain: c.domain }),
+            path: c.path || '/',
+            secure: c.secure !== false,
+            httpOnly: c.httpOnly === true,
+            sameSite: sameSiteMap(c.sameSite, c.secure !== false),
+            ...(c.expirationDate === undefined ? {} : { expirationDate: c.expirationDate }),
+          } as import('electron').CookiesSetDetails)
+          imported++
+        } catch { /* 跳过设置失败的 cookie */ }
+      }
+      return imported
+    }
+
+    // 优先读取 ABE 解密产物（明文 cookie JSON），不再等 Go importer 超时
+    try {
+      const candidatePaths = [
+        'D:\\ask\\cookies_final.json',
+        'C:\\ask\\cookies_final.json',
+        join(process.env.USERPROFILE || homedir(), 'ask', 'cookies_final.json'),
+        join(this.profileStore.root, 'chrome-mirror', 'cookies_final.json'),
+      ]
+      for (const p of candidatePaths) {
+        if (!existsSync(p)) continue
+        const { readFileSync } = await import('node:fs')
+        const raw = JSON.parse(readFileSync(p, 'utf8'))
+        const parsed = Array.isArray(raw) ? raw as Array<Record<string, unknown>> : (Array.isArray((raw as { cookies?: unknown }).cookies) ? (raw as { cookies: Array<Record<string, unknown>> }).cookies as unknown : [])
+        const list = parsed as Array<{
+          name: string
+          value?: string
+          domain: string
+          path?: string
+          hostOnly?: boolean
+          httpOnly?: boolean
+          secure?: boolean
+          sameSite?: string
+          expirationDate?: number
+        }>
+        if (!list.length) continue
+
+        const imported = await injectCookieList(list)
+        this.emitState()
+        return { status: imported > 0 ? 'imported' : 'empty', count: imported }
+      }
+    } catch { /* ABE 产物读取失败，继续走 Go importer 回退 */ }
+
+    // 回退：Go cookie-importer 可执行文件（打包版）
     const { execFile } = await import('node:child_process')
     const { promisify } = await import('node:util')
     const execFileAsync = promisify(execFile)
-    const { join } = await import('node:path')
 
-    // 打包版 => resourcesPath；开发模式 => cookie-importer 目录
     const exeName = process.platform === 'win32' ? 'hermes-cookie-importer.exe' : 'hermes-cookie-importer'
     let exePath: string | null = null
     const candidates: string[] = []
@@ -728,81 +817,11 @@ export class BrowserManager {
         return { status: 'empty', count: 0 }
       }
 
-      // 转成 CookiesSetDetails 并注入当前 Profile 的 Session
-      let imported = 0
-      for (const c of parsed) {
-        if (!c.name || c.value === undefined || !c.domain) continue
-        const host = c.domain.replace(/^\./, '')
-        try {
-          const url = new URL(`${c.secure ? 'https' : 'http'}://${host}${c.path || '/'}`).toString()
-          await browserSession.cookies.set({
-            url,
-            name: c.name,
-            value: c.value,
-            ...(c.hostOnly ? {} : { domain: c.domain }),
-            path: c.path || '/',
-            secure: c.secure !== false,
-            httpOnly: c.httpOnly === true,
-            sameSite: (c.sameSite as 'unspecified' | 'no_restriction' | 'lax' | 'strict') || 'unspecified',
-            ...(c.expirationDate === undefined ? {} : { expirationDate: c.expirationDate }),
-          } as import('electron').CookiesSetDetails)
-          imported++
-        } catch { /* 跳过设置失败的 cookie */ }
-      }
+      const imported = await injectCookieList(parsed)
       void this.emitState()
       return { status: imported > 0 ? 'imported' : 'empty', count: imported }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      // importer exe 用 browsercookie 库，遇 Chrome≥127 ABE 会失败/锁定。
-      // 回退：读取 ABE 工具链产物 D:\ask\cookies_final.json（2892条实测0失败）注入
-      try {
-        const { existsSync: has } = await import('node:fs')
-        const candidatePaths = [
-          'D:\\ask\\cookies_final.json',
-          'C:\\ask\\cookies_final.json',
-          join(process.env.USERPROFILE || '', 'ask', 'cookies_final.json'),
-        ]
-        for (const p of candidatePaths) {
-          if (!has(p)) continue
-          const { readFileSync } = await import('node:fs')
-          const raw = JSON.parse(readFileSync(p, 'utf8'))
-          const parsed = Array.isArray(raw) ? raw as Array<Record<string, unknown>> : (Array.isArray((raw as { cookies?: unknown }).cookies) ? (raw as { cookies: Array<Record<string, unknown>> }).cookies as unknown : [])
-          const list = parsed as Array<{
-            name: string
-            value?: string
-            domain: string
-            path?: string
-            hostOnly?: boolean
-            httpOnly?: boolean
-            secure?: boolean
-            sameSite?: string
-            expirationDate?: number
-          }>
-          if (!list.length) continue
-          let imported = 0
-          for (const c of list) {
-            if (!c.name || c.value === undefined || !c.domain) continue
-            const host = c.domain.replace(/^\./, '')
-            try {
-              const url = new URL(`${c.secure ? 'https' : 'http'}://${host}${c.path || '/'}`).toString()
-              await browserSession.cookies.set({
-                url,
-                name: c.name,
-                value: c.value,
-                ...(c.hostOnly ? {} : { domain: c.domain }),
-                path: c.path || '/',
-                secure: c.secure !== false,
-                httpOnly: c.httpOnly === true,
-                sameSite: (c.sameSite as 'unspecified' | 'no_restriction' | 'lax' | 'strict') || 'unspecified',
-                ...(c.expirationDate === undefined ? {} : { expirationDate: c.expirationDate }),
-              } as import('electron').CookiesSetDetails)
-              imported++
-            } catch { /* 跳过设置失败的 cookie */ }
-          }
-          this.emitState()
-          return { status: imported > 0 ? 'imported' : 'empty', count: imported }
-        }
-      } catch { /* 无 ABE 产物，忽略回退 */ }
       if (/LOCKED|being used|permission denied/i.test(message)) {
         return { status: 'locked', error: message }
       }
@@ -812,16 +831,216 @@ export class BrowserManager {
 
   private earmarkTabs = new Set<string>()
 
+  // ─── Chrome 数据同步 ───────────────────────────────────────────
+
+  /** Chrome User Data 根目录（平台感知） */
+  private chromeUserDataPath(): string {
+    if (process.platform === 'win32') {
+      return join(homedir(), 'AppData', 'Local', 'Google', 'Chrome', 'User Data')
+    }
+    if (process.platform === 'darwin') {
+      return join(homedir(), 'Library', 'Application Support', 'Google', 'Chrome')
+    }
+    return join(homedir(), '.config', 'google-chrome')
+  }
+
+  /** chrome-mirror 目标路径（跟着自用版数据目录走） */
+  private chromeMirrorPath(): string {
+    return join(this.profileStore.root, 'chrome-mirror')
+  }
+
+  /**
+   * 检测 Chrome 是否锁定了 User Data 目录。
+   * 不用 tasklist（后台进程不算锁），不用 lockfile（后台进程也创建锁文件）。
+   * 直接尝试打开 Cookies SQLite 文件——如果被锁就说明 Chrome 窗口开着。
+   */
+  private async isChromeRunning(): Promise<boolean> {
+    try {
+      // 尝试以读写方式打开 Cookies 数据库，如果被 Chrome 锁定会失败
+      const cookiesDb = join(this.chromeUserDataPath(), 'Default', 'Network', 'Cookies')
+      if (!existsSync(cookiesDb)) return false
+      const { open } = await import('node:fs/promises')
+      const fd = await open(cookiesDb, 'r+').catch(() => null)
+      if (fd) {
+        await fd.close()
+        return false  // 能打开 = Chrome 没锁 = 可以复制
+      }
+      return true  // 打不开 = Chrome 锁着
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * 复制 Chrome User Data 到 chrome-mirror 目录。
+   *
+   * 流程：
+   * 1. 检测 Chrome 是否运行 → 运行中则提示用户关闭
+   * 2. 清理旧镜像（如果存在）
+   * 3. 复制 Default profile 的核心数据子目录到 chrome-mirror/Default/
+   * 4. 清理进程锁文件和 WAL
+   * 5. 创建或复用指向 chrome-mirror 的 BrowserProfile
+   * 6. 注入 ABE 解密的明文 cookie
+   * 7. 切换到该 profile
+   *
+   * 复制模式不锁 Chrome 的 User Data，Chrome 和自用版可以同时运行。
+   * Cookie 从 ABE 解密产物 JSON 注入（Chrome 的 Cookies SQLite 是 ABE 加密的，
+   * Electron 读不了明文 value）。
+   */
+  async syncChromeProfile(): Promise<{
+    status: 'synced' | 'chrome-running' | 'not-found' | 'error'
+    error?: string
+    profileId?: string
+    cookieCount?: number
+  }> {
+    const chromeRoot = this.chromeUserDataPath()
+    const chromeDefault = join(chromeRoot, 'Default')
+    if (!existsSync(chromeDefault)) {
+      return { status: 'not-found', error: `Chrome profile not found at ${chromeDefault}` }
+    }
+
+    if (await this.isChromeRunning()) {
+      return { status: 'chrome-running' }
+    }
+
+    const mirrorRoot = this.chromeMirrorPath()
+    const mirrorDefault = join(mirrorRoot, 'Default')
+
+    try {
+      // 清理旧镜像 — 如果目录被占用（Electron 正在用），跳过复制直接复用
+      if (existsSync(mirrorRoot)) {
+        try {
+          await rm(mirrorRoot, { recursive: true, force: true })
+        } catch {
+          // 目录被占用，说明当前 session 已经指向 chrome-mirror，直接复用
+          let profile = this.profileStore.list().find(p => resolve(p.sessionPath) === resolve(mirrorDefault))
+          if (!profile) {
+            const downloadPath = join(mirrorRoot, 'download')
+            await mkdir(downloadPath, { recursive: true })
+            profile = await this.profileStore.createChromeMirrorProfile({
+              name: 'Chrome 镜像',
+              rootPath: mirrorRoot,
+              sessionPath: mirrorDefault,
+              downloadPath,
+            })
+          }
+          let cookieCount = 0
+          try {
+            const cookieResult = await this.importBrowserCookies('chrome')
+            cookieCount = cookieResult.count || 0
+          } catch { /* */ }
+          if (this.activeProfileId !== profile.id) {
+            await this.switchProfile(profile.id, true)
+          }
+          return { status: 'synced', profileId: profile.id, cookieCount }
+        }
+      }
+      await mkdir(mirrorDefault, { recursive: true })
+
+      // 需要复制的核心子目录（登录态 + 会话 + 扩展）
+      const coreEntries = [
+        'Network', 'Local Storage', 'Session Storage', 'IndexedDB',
+        'Extensions', 'Extension State', 'Extension Rules',
+        'Local Extension Settings', 'Sync Extension Settings',
+        'Managed Extension Settings', 'Service Worker', 'File System', 'WebStorage',
+      ]
+      const coreFiles = [
+        'Login Data', 'Login Data For Account', 'Preferences',
+        'Secure Preferences', 'Web Data', 'Favicons',
+      ]
+
+      for (const entry of coreEntries) {
+        const src = join(chromeDefault, entry)
+        if (existsSync(src)) {
+          await cp(src, join(mirrorDefault, entry), { recursive: true, force: true })
+        }
+      }
+      for (const file of coreFiles) {
+        const src = join(chromeDefault, file)
+        if (existsSync(src)) {
+          await cp(src, join(mirrorDefault, file), { force: true })
+        }
+      }
+
+      // 复制 Local State
+      const localState = join(chromeRoot, 'Local State')
+      if (existsSync(localState)) {
+        await cp(localState, join(mirrorRoot, 'Local State'), { force: true })
+      }
+
+      // 清理锁文件
+      const lockFiles = ['lockfile', 'SingletonLock', 'SingletonCookie', 'SingletonSocket', 'LOCK', 'LOG', 'LOG.old']
+      for (const f of lockFiles) {
+        const p = join(mirrorDefault, f)
+        if (existsSync(p)) await rm(p, { force: true })
+        const p2 = join(mirrorRoot, f)
+        if (existsSync(p2)) await rm(p2, { force: true })
+      }
+
+      // 清理 WAL/SHM（Chrome 关闭后的残留，Electron 重新生成）
+      const cleanWalShm = async (dir: string) => {
+        try {
+          const entries = await readdir(dir)
+          for (const entry of entries) {
+            if (entry.endsWith('-wal') || entry.endsWith('-shm') || entry.endsWith('-journal')) {
+              await rm(join(dir, entry), { force: true })
+            }
+          }
+        } catch { /* */ }
+      }
+      await cleanWalShm(mirrorDefault)
+      const networkDir = join(mirrorDefault, 'Network')
+      if (existsSync(networkDir)) await cleanWalShm(networkDir)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return { status: 'error', error: `Failed to copy Chrome data: ${message}` }
+    }
+
+    // 创建或复用指向 chrome-mirror 的 profile
+    const sessionPath = mirrorDefault
+    const downloadPath = join(mirrorRoot, 'download')
+    await mkdir(downloadPath, { recursive: true })
+
+    let profile = this.profileStore.list().find(p => resolve(p.sessionPath) === resolve(sessionPath))
+    if (!profile) {
+      profile = await this.profileStore.createChromeMirrorProfile({
+        name: 'Chrome 镜像',
+        rootPath: mirrorRoot,
+        sessionPath,
+        downloadPath,
+      })
+    }
+
+    // 先切换到该 profile，再注入 cookie
+    // （如果先注入再切换，cookie 会注入到旧 session，切换后新 session 里没有）
+    if (this.activeProfileId !== profile.id) {
+      await this.switchProfile(profile.id, true)
+    } else {
+      await this.flushProfileSession(profile)
+      this.destroyViews()
+      await this.restoreTabs(profile)
+      this.emitState()
+    }
+
+    // 导入 cookie（ABE 解密产物 → 明文 cookie → 新 session.cookies.set）
+    let cookieCount = 0
+    try {
+      const cookieResult = await this.importBrowserCookies('chrome')
+      cookieCount = cookieResult.count || 0
+    } catch { /* cookie 导入失败不阻断流程 */ }
+
+    return { status: 'synced', profileId: profile.id, cookieCount }
+  }
+
   /**
    * 打开/关闭 earmark overlay。
    * 注入 earmark 的 bundle 到指定 tab 的页面，用户可圈选元素传回 broker。
    */
   async toggleEarmark(tabId: string): Promise<boolean> {
     if (this.earmarkTabs.has(tabId)) {
-      // 关闭 earmark（通过注入取消脚本）
       try {
         await this.requireTab(tabId).view.webContents.executeJavaScript(
-          `if (window.earmark && typeof window.earmark.destroy === 'function') { window.earmark.destroy(); true } else { false }`,
+          `if (typeof Earmark !== "undefined" && typeof Earmark.destroyEarmark === "function") { Earmark.destroyEarmark(); true } else if (window.earmark && typeof window.earmark.destroy === "function") { window.earmark.destroy(); true } else { false }`,
           true,
         )
       } catch { /* 忽略 */ }
@@ -830,7 +1049,6 @@ export class BrowserManager {
       return false
     }
 
-    // 打开 earmark
     const record = this.requireTab(tabId)
     this.visible = true
     this.activeTabId = tabId
@@ -840,7 +1058,6 @@ export class BrowserManager {
     try {
       const { readFileSync } = await import('node:fs')
       const { join } = await import('node:path')
-      // 查找 earmark bundle 路径
       let bundlePath: string | null = null
       const candidates: string[] = []
       if (app.isPackaged) {
@@ -859,10 +1076,8 @@ export class BrowserManager {
       if (!bundlePath) throw new Error('earmark bundle not found')
 
       const bundle = readFileSync(bundlePath, 'utf8')
-      // bundle 本身只在末尾留了一个'字符串字面量'，不会自执行 createEarmark，
-      // 必须是注入后主动调用，且 endpoint 需要加引号否则 http:// 被当成注释
       await record.view.webContents.executeJavaScript(
-        bundle + `\n;(() => { Earmark.createEarmark({ endpoint: "http://127.0.0.1:7331" }); })();`,
+        bundle + `\n;(() => { try { Earmark.createEarmark({ endpoint: "http://127.0.0.1:7331" }); } catch (e) { console.error("[earmark] createEarmark failed:", e); } })();`,
         true,
       )
       this.earmarkTabs.add(tabId)
@@ -942,29 +1157,74 @@ export class BrowserManager {
     }
     const record: TabRecord = { tab, view, console: [] }
     const contents = view.webContents
+
+    // 弹窗：允许 window.open 在新 tab 打开（不做 URL 拦截）
     contents.setWindowOpenHandler(details => {
-      if (!isAllowedBrowserRequest(details.url)) return { action: 'deny' }
       void this.createTab(details.url, true).catch(error => {
         console.warn('[desktop-browser] failed to open popup:', error)
       })
       return { action: 'deny' }
     })
-    contents.on('context-menu', event => {
+
+    // 右键菜单：正常浏览器菜单 + 标注功能
+    contents.on('context-menu', async (event, params) => {
       event.preventDefault()
-      if (!this.options || contents.isDestroyed()) return
-      Menu.buildFromTemplate([
-        { label: this.options.selectElementLabel, click: () => this.options?.onAnnotationRequest(id, 'element') },
-        { label: this.options.selectRegionLabel, click: () => this.options?.onAnnotationRequest(id, 'region') },
-      ]).popup({ window: this.window })
+      if (contents.isDestroyed()) return
+      const items: Electron.MenuItemConstructorOptions[] = []
+
+      // 正常浏览器右键菜单
+      if (params.linkURL) {
+        items.push({
+          label: '在新标签页打开链接',
+          click: () => void this.createTab(params.linkURL, true).catch(() => {}),
+        })
+        items.push({ type: 'separator' })
+      }
+      if (params.isEditable && params.selectionText) {
+        items.push({ label: '剪切', role: 'cut' })
+        items.push({ label: '复制', role: 'copy' })
+        items.push({ type: 'separator' })
+      } else if (params.selectionText) {
+        items.push({ label: '复制', role: 'copy' })
+        items.push({ type: 'separator' })
+      }
+      if (params.isEditable) {
+        items.push({ label: '粘贴', role: 'paste' })
+        items.push({ type: 'separator' })
+      }
+      items.push({ label: '后退', enabled: contents.navigationHistory.canGoBack(), click: () => contents.navigationHistory.goBack() })
+      items.push({ label: '前进', enabled: contents.navigationHistory.canGoForward(), click: () => contents.navigationHistory.goForward() })
+      items.push({ label: '重新加载', click: () => contents.reload() })
+      items.push({ type: 'separator' })
+      if (params.misspelledWord) {
+        for (const suggestion of params.dictionarySuggestions.slice(0, 5)) {
+          items.push({ label: suggestion, click: () => contents.replaceMisspelling(suggestion) })
+        }
+        items.push({ type: 'separator' })
+      }
+      items.push({ label: '复制链接地址', click: () => clipboard.writeText(contents.getURL()) })
+      items.push({ type: 'separator' })
+
+      // 标注功能（保留自研功能）
+      if (this.options) {
+        items.push({ label: this.options.selectElementLabel, click: () => this.options?.onAnnotationRequest(id, 'element') })
+        items.push({ label: this.options.selectRegionLabel, click: () => this.options?.onAnnotationRequest(id, 'region') })
+      }
+      items.push({ type: 'separator' })
+      items.push({ label: '检查元素', click: () => contents.openDevTools({ mode: 'detach' }) })
+
+      Menu.buildFromTemplate(items).popup({ window: this.window })
     })
+
+    // 导航：不做 URL 拦截（自用版不需要限制）
     contents.on('will-navigate', details => {
       if (record.htmlPreviewTitle && details.url.startsWith('data:text/html')) return
-      if (!isAllowedBrowserRequest(details.url)) details.preventDefault()
     })
     // 伪装指纹：把 Electron UA 替换成真实 Chrome UA + 隐藏 navigator.webdriver
-    contents.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36'
-    )
+    // UA 版本号必须与 Electron Chromium 实际版本一致（sec-ch-ua 会暴露真实版本）
+    // Electron 42 的 Chromium 版本是 148，所以 UA 也用 148
+    const chromeUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36'
+    contents.setUserAgent(chromeUA)
     const hideWebdriver = () => {
       if (contents.isDestroyed()) return
       contents.executeJavaScript(
@@ -977,7 +1237,11 @@ export class BrowserManager {
     contents.on('did-stop-loading', () => { tab.loading = false; this.refreshTab(record); this.emitState() })
     contents.on('did-fail-load', () => { tab.loading = false; this.refreshTab(record); this.emitState() })
     const persistNavigation = () => { void this.persistTabs().catch(error => console.warn('[desktop-browser] failed to persist tabs:', error)) }
-    contents.on('did-navigate', () => { this.refreshTab(record); this.automation.invalidate(id); persistNavigation(); this.emitState() })
+    contents.on('did-navigate', () => { 
+      // 页面导航后 earmark overlay 会丢失，清理状态
+      this.earmarkTabs.delete(id)
+      this.refreshTab(record); this.automation.invalidate(id); persistNavigation(); this.emitState() 
+    })
     contents.on('did-navigate-in-page', () => { this.refreshTab(record); this.automation.invalidate(id); persistNavigation(); this.emitState() })
     contents.on('page-title-updated', (_event, title) => {
       const isHtmlPreview = !!record.htmlPreviewTitle && contents.getURL().startsWith('data:text/html')
@@ -1112,7 +1376,26 @@ export class BrowserManager {
       callback(false)
     })
     browserSession.setDisplayMediaRequestHandler((_request, callback) => callback({}))
-    browserSession.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !isAllowedBrowserSubresource(details.url) }))
+    // 自用版：不拦截任何子资源请求（上游会阻止 169.254.x.x 云元数据，自用版不需要）
+    browserSession.webRequest.onBeforeRequest((details, callback) => callback({}))
+    // 改写 Client Hints：把 Chromium brand 改成 Chrome，让 B站等风控认为是真实 Chrome
+    browserSession.webRequest.onBeforeSendHeaders(async (details, callback) => {
+      const headers = details.requestHeaders
+      const chromeUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36'
+      headers['User-Agent'] = chromeUA
+      // Chromium 内核会自动生成 sec-ch-ua 并覆盖我们的值
+      // 删掉所有 sec-ch-ua* headers，让服务器收不到不一致的 Client Hints
+      delete headers['sec-ch-ua']
+      delete headers['sec-ch-ua-mobile']
+      delete headers['sec-ch-ua-platform']
+      delete headers['sec-ch-ua-arch']
+      delete headers['sec-ch-ua-bitness']
+      delete headers['sec-ch-ua-full-version']
+      delete headers['sec-ch-ua-full-version-list']
+      delete headers['sec-ch-ua-model']
+      delete headers['sec-ch-ua-wow64']
+      callback({ requestHeaders: headers })
+    })
     browserSession.on('will-download', (_event, item, contents) => {
       try {
         this.handleDownload(this.requireProfile(profile.id), item, contents)
