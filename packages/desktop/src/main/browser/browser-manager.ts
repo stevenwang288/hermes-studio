@@ -743,9 +743,14 @@ export class BrowserManager {
     // 优先读取 ABE 解密产物（明文 cookie JSON），不再等 Go importer 超时
     try {
       const candidatePaths = [
+        // Windows: ABE 工具链产物
         'D:\\ask\\cookies_final.json',
         'C:\\ask\\cookies_final.json',
         join(process.env.USERPROFILE || homedir(), 'ask', 'cookies_final.json'),
+        // Linux: 从 Chrome 直接解密的产物（用 jq/python 从 kwallet 提取）
+        join(homedir(), 'ask', 'cookies_final.json'),
+        '/tmp/cookies_final.json',
+        // chrome-mirror 目录
         join(this.profileStore.root, 'chrome-mirror', 'cookies_final.json'),
       ]
       for (const p of candidatePaths) {
@@ -1223,7 +1228,13 @@ export class BrowserManager {
     // 伪装指纹：把 Electron UA 替换成真实 Chrome UA + 隐藏 navigator.webdriver
     // UA 版本号必须与 Electron Chromium 实际版本一致（sec-ch-ua 会暴露真实版本）
     // Electron 42 的 Chromium 版本是 148，所以 UA 也用 148
-    const chromeUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36'
+    // 平台感知：Windows 和 Linux 用不同的平台标识
+    const platformUA = process.platform === 'win32'
+      ? 'Windows NT 10.0; Win64; x64'
+      : process.platform === 'darwin'
+      ? 'Macintosh; Intel Mac OS X 10_15_7'
+      : 'X11; Linux x86_64'
+    const chromeUA = `Mozilla/5.0 (${platformUA}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36`
     contents.setUserAgent(chromeUA)
     const hideWebdriver = () => {
       if (contents.isDestroyed()) return
@@ -1381,7 +1392,12 @@ export class BrowserManager {
     // 改写 Client Hints：把 Chromium brand 改成 Chrome，让 B站等风控认为是真实 Chrome
     browserSession.webRequest.onBeforeSendHeaders(async (details, callback) => {
       const headers = details.requestHeaders
-      const chromeUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36'
+      const platformUA = process.platform === 'win32'
+        ? 'Windows NT 10.0; Win64; x64'
+        : process.platform === 'darwin'
+        ? 'Macintosh; Intel Mac OS X 10_15_7'
+        : 'X11; Linux x86_64'
+      const chromeUA = `Mozilla/5.0 (${platformUA}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36`
       headers['User-Agent'] = chromeUA
       // Chromium 内核会自动生成 sec-ch-ua 并覆盖我们的值
       // 删掉所有 sec-ch-ua* headers，让服务器收不到不一致的 Client Hints
