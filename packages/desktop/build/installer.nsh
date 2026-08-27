@@ -111,7 +111,6 @@
     Pop $0
     nsExec::ExecToLog 'taskkill.exe /IM "Hermes Studio.exe" /T /F'
     Pop $0
-  hermesStudioStopDone:
 !macroend
 
 !macro repairHermesStudioUninstaller
