@@ -1,9 +1,17 @@
 !macro stopHermesStudioProcesses
-  IfFileExists "$INSTDIR\Hermes Studio.exe" 0 hermesStudioStopDone
+  ; 兼容 fork 版(爱马仕.exe)和上游版(Hermes Studio.exe)
+  IfFileExists "$INSTDIR\爱马仕.exe" 0 tryUpstreamExe
+    DetailPrint "Stopping 爱马仕..."
+    nsExec::ExecToLog '"$INSTDIR\爱马仕.exe" --quit'
+    Pop $0
+    Goto stopProcesses
+  tryUpstreamExe:
+  IfFileExists "$INSTDIR\Hermes Studio.exe" 0 stopProcesses
     DetailPrint "Stopping Hermes Studio..."
     nsExec::ExecToLog '"$INSTDIR\Hermes Studio.exe" --quit'
     Pop $0
 
+  stopProcesses:
     InitPluginsDir
     FileOpen $0 "$PLUGINSDIR\stop-hermes-studio.ps1" w
     FileWrite $0 "$$ErrorActionPreference = 'SilentlyContinue'$\r$\n"
@@ -52,7 +60,7 @@
     FileWrite $0 "  return $$roots | Select-Object -Unique$\r$\n"
     FileWrite $0 "}$\r$\n"
     FileWrite $0 "function Get-HermesStudioProcess {$\r$\n"
-    FileWrite $0 "  Get-CimInstance Win32_Process -Filter $\"Name = 'Hermes Studio.exe'$\" | Where-Object {$\r$\n"
+    FileWrite $0 "  Get-CimInstance Win32_Process | Where-Object {$\r$\n"
     FileWrite $0 "    try { $$_.ExecutablePath -and ([System.IO.Path]::GetFullPath($$_.ExecutablePath) -ieq $$target) } catch { $$false }$\r$\n"
     FileWrite $0 "  }$\r$\n"
     FileWrite $0 "}$\r$\n"
@@ -93,12 +101,14 @@
     FileWrite $0 "exit 1$\r$\n"
     FileClose $0
 
-    System::Call 'kernel32::SetEnvironmentVariable(t "HERMES_STUDIO_EXE", t "$INSTDIR\Hermes Studio.exe") i .r0'
+    System::Call 'kernel32::SetEnvironmentVariable(t "HERMES_STUDIO_EXE", t "$INSTDIR\爱马仕.exe") i .r0'
     System::Call 'kernel32::SetEnvironmentVariable(t "HERMES_STUDIO_INSTALL_DIR", t "$INSTDIR") i .r0'
     nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\stop-hermes-studio.ps1"'
     Pop $0
     System::Call 'kernel32::SetEnvironmentVariable(t "HERMES_STUDIO_EXE", t "") i .r0'
     System::Call 'kernel32::SetEnvironmentVariable(t "HERMES_STUDIO_INSTALL_DIR", t "") i .r0'
+    nsExec::ExecToLog 'taskkill.exe /IM "爱马仕.exe" /T /F'
+    Pop $0
     nsExec::ExecToLog 'taskkill.exe /IM "Hermes Studio.exe" /T /F'
     Pop $0
   hermesStudioStopDone:
@@ -106,7 +116,7 @@
 
 !macro repairHermesStudioUninstaller
   IfFileExists "$INSTDIR\${UNINSTALL_FILENAME}" 0 hermesStudioRepairDone
-    DetailPrint "Repairing Hermes Studio uninstaller..."
+    DetailPrint "Repairing uninstaller..."
     SetOutPath "$INSTDIR"
     Delete "$INSTDIR\${UNINSTALL_FILENAME}.hermes-repair"
     ClearErrors
@@ -128,11 +138,35 @@
   hermesStudioRepairDone:
 !macroend
 
+; 迁移旧版(hermes-studio)的 Local Storage 到新版(hermes-studio-self)
+; 让工作区历史路径等 localStorage 数据不丢失
+!macro migrateOldData
+  IfFileExists "$APPDATA\hermes-studio\Local Storage" 0 migrateDone
+    CreateDirectory "$APPDATA\hermes-studio-self\Local Storage"
+    DetailPrint "Migrating localStorage from hermes-studio to hermes-studio-self..."
+    CopyFiles /SILENT "$APPDATA\hermes-studio\Local Storage\*.*" "$APPDATA\hermes-studio-self\Local Storage\"
+  migrateDone:
+!macroend
+
+; 安装后刷新 Windows 图标缓存（解决快捷方式图标不更新）
+!macro refreshIconCache
+  DetailPrint "Refreshing icon cache..."
+  Delete "$LOCALAPPDATA\IconCache.db"
+  nsExec::ExecToLog '"$SYSDIR\ie4uinit.exe" -show'
+  Pop $0
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+!macroend
+
 !macro customInit
   !insertmacro stopHermesStudioProcesses
   !insertmacro repairHermesStudioUninstaller
+  !insertmacro migrateOldData
 !macroend
 
 !macro customCheckAppRunning
   !insertmacro stopHermesStudioProcesses
+!macroend
+
+!macro customInstall
+  !insertmacro refreshIconCache
 !macroend
