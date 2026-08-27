@@ -85,7 +85,13 @@ function loadCachedTheme(userId: number | null): UserThemeSettings {
 }
 
 const brightness = ref<BrightnessMode>(
-  (localStorage.getItem(BRIGHTNESS_KEY) as BrightnessMode) || 'dark',
+  (() => {
+    const stored = localStorage.getItem(BRIGHTNESS_KEY) as BrightnessMode | null
+    if (stored && stored !== 'system') return stored
+    // 旧用户可能存了 'system'，强制改为 dark
+    localStorage.setItem(BRIGHTNESS_KEY, 'dark')
+    return 'dark'
+  })(),
 )
 const style = ref<ThemeStyle>(
   (localStorage.getItem(STYLE_KEY) as ThemeStyle) || 'ink',
@@ -255,6 +261,15 @@ function resetCustomization(): Promise<void> {
 
 applyClasses()
 void loadBackground()
+
+// 默认应用最深的内置壁纸（matrix-green，纯黑底）
+const DEFAULT_WALLPAPER_KEY = 'hermes_builtin_wallpaper'
+if (!localStorage.getItem(DEFAULT_WALLPAPER_KEY)) {
+  const defaultWallpaperCss = 'radial-gradient(ellipse at 50% 100%, rgba(0,128,0,0.15) 0%, transparent 60%), linear-gradient(180deg, #000000 0%, #0a0f0a 50%, #001200 100%)'
+  document.documentElement.style.setProperty('--app-background-image', defaultWallpaperCss)
+  document.documentElement.classList.add('theme-has-custom-background')
+  localStorage.setItem(DEFAULT_WALLPAPER_KEY, 'matrix-green')
+}
 
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
   if (brightness.value === 'system') applyClasses()
