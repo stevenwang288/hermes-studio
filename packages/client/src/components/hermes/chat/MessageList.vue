@@ -18,7 +18,9 @@ import MessageItem from "./MessageItem.vue";
 import LiveReasoningStatus from "./LiveReasoningStatus.vue";
 import ToolRunCard from "./ToolRunCard.vue";
 import MessageQueueFloatPanel from "./MessageQueueFloatPanel.vue";
+import PendingInteractionCountdown from "./PendingInteractionCountdown.vue";
 import { LIVE_CHAT_MAX_LOADED_MESSAGES, parseMessageReference, useChatStore, type Message } from "@/stores/hermes/chat";
+import { useProfilesStore } from "@/stores/hermes/profiles";
 import { useToolTraceVisibility } from "@/composables/useToolTraceVisibility";
 import { openSubagentStream, subagentIdFromToolCall } from "@/utils/hermes/subagent-stream";
 import { messageScrollPositionKey, rememberMessageScrollPosition } from "./message-scroll-position";
@@ -35,6 +37,7 @@ const props = withDefaults(defineProps<{
 })
 
 const chatStore = useChatStore();
+const profilesStore = useProfilesStore();
 const { t } = useI18n();
 const { toolTraceVisible } = useToolTraceVisibility();
 const listRef = ref<InstanceType<typeof VirtualMessageList> | null>(null);
@@ -172,6 +175,16 @@ const liveReasoningDetail = computed<{
 });
 
 const assistantAgent = computed(() => chatSessionAgentAvatar(chatStore.activeSession));
+const activeSessionProfileName = computed(() => (
+  chatStore.activeSession?.profile || profilesStore.activeProfileName || "default"
+));
+const activeSessionProfile = computed(() => (
+  profilesStore.profiles.find(profile => profile.name === activeSessionProfileName.value) || null
+));
+const userProfileName = computed(() => (
+  activeSessionProfile.value?.alias?.trim() || activeSessionProfileName.value
+));
+const userProfileAvatar = computed(() => activeSessionProfile.value?.avatar || null);
 
 const emptyState = computed(() => {
   const agent = assistantAgent.value;
@@ -695,12 +708,14 @@ defineExpose({
           <div class="fork-divider-line" aria-hidden="true"></div>
         </div>
         <MessageItem
-                  v-else
-                  :message="msg"
-                  :assistant-agent="assistantAgent"
-                  :highlight="chatStore.focusMessageId === msg.id"
-                  :show-fork-action="canForkActiveSession && msg.id === lastForkActionMessageId"
-                />
+          v-else
+          :message="msg"
+          :assistant-agent="assistantAgent"
+          :user-profile-name="userProfileName"
+          :user-profile-avatar="userProfileAvatar"
+          :highlight="chatStore.focusMessageId === msg.id"
+          :show-fork-action="canForkActiveSession && msg.id === lastForkActionMessageId"
+        />
       </template>
       <template #after>
         <Transition name="fade">
@@ -927,6 +942,7 @@ defineExpose({
               </svg>
             </span>
             <span>{{ t("chat.approvalKicker") }}</span>
+            <PendingInteractionCountdown :deadline="visibleApproval.countdownDeadline" />
           </div>
           <div class="approval-float-title">{{ t("chat.approvalTitle") }}</div>
           <div class="approval-float-desc">{{ visibleApproval.description }}</div>
@@ -997,6 +1013,7 @@ defineExpose({
               </svg>
             </span>
             <span>{{ t("chat.clarifyKicker") }}</span>
+            <PendingInteractionCountdown :deadline="visibleClarify.countdownDeadline" />
           </div>
           <div class="approval-float-title">{{ t("chat.clarifyTitle") }}</div>
           <div class="approval-float-desc">{{ visibleClarify.question }}</div>

@@ -48,7 +48,7 @@ export default defineConfig({
     minify: 'esbuild',
     // Disable sourcemap generation for faster builds
     sourcemap: false,
-    target: 'es2020',
+    target: 'es2022',
     // Increase chunk size warning limit (default: 500KB)
     chunkSizeWarningLimit: 1000,
     // CSS code splitting for better caching

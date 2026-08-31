@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
   downloadWebUiVersion: vi.fn(),
   fetchRuntimeVersionStatus: vi.fn(),
   fetchVersionDownloadJobs: vi.fn(),
+  restartWebUiAfterRuntimeChange: vi.fn(),
   selectRuntimeRoot: vi.fn(),
 }))
 
@@ -26,7 +27,7 @@ vi.mock('vue-i18n', () => ({
 }))
 vi.mock('naive-ui', () => ({
   NAlert: { template: '<div><slot /></div>' },
-  NButton: { template: '<button v-bind="$attrs" @click="$emit(\'click\')"><slot /></button>' },
+  NButton: { emits: ['click'], template: '<button v-bind="$attrs" @click="$emit(\'click\')"><slot /></button>' },
   NDrawer: { props: ['show'], template: '<div v-if="show"><slot /></div>' },
   NDrawerContent: { template: '<div><slot /></div>' },
   NPopconfirm: { template: '<div><slot name="trigger" /><slot /></div>' },
@@ -49,11 +50,16 @@ function runtimeStatus() {
       activeVersion: '0.18.0',
       agentVersion: 'v0.19.1 (2026.7.30) · upstream 3f497e2b · local 470cf66b (+1 carried commit)',
       activeDirectory: '/state/desktop-runtime/hermes/0.18.0/mac-arm64',
+      pythonPath: '/state/desktop-runtime/hermes/0.18.0/mac-arm64/python/venv/bin/python3',
+      agentRoot: '/state/desktop-runtime/hermes/0.18.0/mac-arm64/python',
+      source: 'managed-runtime' as const,
+      dataDirectory: '/state/.hermes',
       storageDirectory: '/state/desktop-runtime',
       defaultStorageDirectory: '/state/desktop-runtime',
       pendingStorageDirectory: '',
       migrationError: '',
       activationError: '',
+      cliInstallations: [],
       installed: [],
       remoteVersions: [],
     },
@@ -76,6 +82,7 @@ describe('VersionManagementModal Runtime storage selector', () => {
     api.fetchRuntimeVersionStatus.mockResolvedValue(runtimeStatus())
     api.fetchVersionDownloadJobs.mockResolvedValue({ jobs: [] })
     api.selectRuntimeRoot.mockResolvedValue({ success: true, active: {} })
+    api.restartWebUiAfterRuntimeChange.mockResolvedValue({ success: true })
   })
 
   it('explains how to update Hermes Runtime from the command line', async () => {
@@ -86,6 +93,7 @@ describe('VersionManagementModal Runtime storage selector', () => {
     const note = wrapper.get('[data-testid="runtime-cli-update-note"]')
     expect(note.text()).toContain('runtimeVersions.cliUpdateDescription')
     expect(note.text()).toContain('hermes-studio cli update')
+    expect(api.fetchRuntimeVersionStatus).toHaveBeenCalledWith()
   })
 
   it('shows the installed Hermes Agent version instead of the Runtime package version', async () => {
@@ -101,6 +109,18 @@ describe('VersionManagementModal Runtime storage selector', () => {
 
     const runtimeDirectory = wrapper.get('[data-testid="active-runtime-directory"]')
     expect(runtimeDirectory.text()).toContain('/state/desktop-runtime/hermes/0.18.0/mac-arm64')
+
+    const pythonPath = wrapper.get('[data-testid="active-python-path"]')
+    expect(pythonPath.text()).toContain('/state/desktop-runtime/hermes/0.18.0/mac-arm64/python/venv/bin/python3')
+
+    const agentRoot = wrapper.get('[data-testid="active-agent-root"]')
+    expect(agentRoot.text()).toContain('/state/desktop-runtime/hermes/0.18.0/mac-arm64/python')
+
+    const dataDirectory = wrapper.get('[data-testid="active-data-directory"]')
+    expect(dataDirectory.text()).toContain('/state/.hermes')
+    const dataDirectoryHint = wrapper.get('[data-testid="hermes-data-directory-env-hint"]')
+    expect(dataDirectoryHint.text()).toContain('runtimeVersions.dataDirectoryEnvDescription')
+    expect(dataDirectoryHint.text()).toContain('HERMES_HOME')
   })
 
   it('shows Runtime versions returned by the Studio version API', async () => {
@@ -114,6 +134,40 @@ describe('VersionManagementModal Runtime storage selector', () => {
 
     expect(wrapper.text()).toContain('0.20.4')
     expect(wrapper.text()).toContain('0.20.0')
+  })
+
+  it('shows selected user CLI paths in a read-only details drawer', async () => {
+    const status = runtimeStatus()
+    delete (status.hermes as { source?: string }).source
+    status.hermes.cliInstallations = [{
+      path: '/Users/test/.local/bin/hermes',
+      version: 'v0.20.6',
+      source: 'user-cli',
+      selected: true,
+    }]
+    status.hermes.pythonPath = '/Users/test/.hermes/hermes-agent/venv/bin/python3'
+    status.hermes.agentRoot = '/Users/test/.hermes/hermes-agent'
+    status.hermes.dataDirectory = '/Users/test/.hermes'
+    api.fetchRuntimeVersionStatus.mockResolvedValue(status)
+    const wrapper = mount(VersionManagementModal, { props: { show: false } })
+
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="active-python-path"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="active-agent-root"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="active-data-directory"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="cli-details"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="view-cli-details"]').trigger('click')
+
+    const details = wrapper.get('[data-testid="cli-details"]')
+    expect(details.text()).toContain('/Users/test/.hermes/hermes-agent/venv/bin/python3')
+    expect(details.text()).toContain('/Users/test/.hermes/hermes-agent')
+    expect(details.text()).toContain('/Users/test/.hermes')
+    expect(details.text()).toContain('runtimeVersions.dataDirectoryEnvDescription')
+    expect(details.text()).toContain('launchctl setenv HERMES_HOME')
+    expect(details.text()).toContain('HERMES_HOME=/home/agent/.hermes')
   })
 
   it('shows the Runtime fallback reason and hides Web UI version switching', async () => {
@@ -170,5 +224,30 @@ describe('VersionManagementModal Runtime storage selector', () => {
 
     expect(api.selectRuntimeRoot).toHaveBeenCalledWith('/state/desktop-runtime')
     expect(message.success).toHaveBeenCalledWith('runtimeVersions.runtimeDirectorySaved')
+  })
+
+  it('restarts standalone Web UI after selecting an installed Runtime', async () => {
+    const status = runtimeStatus()
+    status.hermes.remoteVersions = ['0.20.4']
+    status.hermes.installed = [{
+      version: '0.20.4',
+      platform: 'mac-arm64',
+      directory: '/state/desktop-runtime/hermes/0.20.4/mac-arm64',
+      active: false,
+    }]
+    api.fetchRuntimeVersionStatus.mockResolvedValue(status)
+    api.activateRuntimeVersion.mockResolvedValue({ success: true, active: {} })
+    const wrapper = mount(VersionManagementModal, { props: { show: false } })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    const useVersion = wrapper.findAll('button').find(button => button.text() === 'runtimeVersions.useVersion')
+    expect(useVersion).toBeDefined()
+    await useVersion!.trigger('click')
+    await flushPromises()
+
+    expect(api.activateRuntimeVersion).toHaveBeenCalledWith('0.20.4')
+    expect(api.restartWebUiAfterRuntimeChange).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
   })
 })
