@@ -212,14 +212,14 @@ JavaScript 运行时也会为不与根字段冲突的 Profile 安装直接属性
 | `skillsAvailable?` | 每轮求值的动态 Skill 能力探针；故障修复后同一 runtime 可恢复发现与路由。 |
 | `systemPrompt?`, `runtimeInstructions?` | 系统提示覆盖与固定附加指令。 |
 | `temporaryRuntimeInstructions?` | 每轮重新求值的临时指令 Provider；用于进程诊断，不写入 memory。 |
-| `maxSteps?`, `maxModelRetries?`, `maxConsecutiveToolFailures?` | 主循环、模型重试和连续工具失败上限。 |
+| `maxSteps?`, `maxModelRetries?`, `toolFailureRecoveryThreshold?` | 主循环、模型重试和同一工具连续失败后的模型纠错阈值。`maxConsecutiveToolFailures?` 仅作兼容，不再终止运行。 |
 | `backgroundDelegationEnabled?`, `subtaskMaxSteps?` | 后台委派开关和子任务步数。 |
 | `modelDefaults?` | 除 messages/tools/stream 外的默认模型请求字段。 |
 | `contextKey?` | Runtime 上下文缓存键。 |
 | `memory?` | 自定义 MemoryService；默认使用共享服务并由运行身份限定 Profile。 |
 | `logWriter?`, `logProfile?` | 自定义结构化日志写入器和 Profile 标签。 |
 
-`AgentRuntime.run(input)` 的 `input` 字段包括：必填 `messages`；可选 `signal`、`systemPrompt`、`skills`、`maxSteps`、`maxModelRetries`、`maxConsecutiveToolFailures`、`toolContext`、`model`、`temperature`、`maxTokens`、`reasoningEffort`、`reasoningSummary`、`metadata`、`modelClient`、`modelDefaults`、`contextKey`、`context`、`memoryEnabled`、`memoryInput`、`backgroundDelegationEnabled`、`logContext`、`onSkillReviewUsage`、`onEvent`。完整方法签名见文末自动清单。
+`AgentRuntime.run(input)` 的 `input` 字段包括：必填 `messages`；可选 `signal`、`systemPrompt`、`skills`、`maxSteps`、`maxModelRetries`、`toolFailureRecoveryThreshold`、兼容字段 `maxConsecutiveToolFailures`、`toolContext`、`model`、`temperature`、`maxTokens`、`reasoningEffort`、`reasoningSummary`、`metadata`、`modelClient`、`modelDefaults`、`contextKey`、`context`、`memoryEnabled`、`memoryInput`、`backgroundDelegationEnabled`、`logContext`、`onSkillReviewUsage`、`onEvent`。同一工具连续失败达到阈值时，runtime 注入纠错指令并继续运行，不会因该阈值终止。完整方法签名见文末自动清单。
 
 ## Profile `memory` 模块
 
@@ -345,7 +345,8 @@ API mode 固定映射：`chat_completions` → `openai-chat`，`codex_responses`
 | `schemaVersion` | `number` | 当前为 7；读取旧配置时补齐新字段。 |
 | `runtime.maxSteps` | `number` | 单次主循环最大步数。 |
 | `runtime.maxModelRetries` | `number` | 单次模型步骤最大重试。 |
-| `runtime.maxConsecutiveToolFailures` | `number` | 连续工具失败终止阈值。 |
+| `runtime.toolFailureRecoveryThreshold` | `number` | 同一工具连续失败后要求模型纠错或换方案的阈值；默认 3，不终止运行。 |
+| `runtime.maxConsecutiveToolFailures` | `number` | 已弃用的兼容字段，不再终止运行。 |
 | `model.defaultProvider` | `string` | 默认 Provider ID。 |
 | `model.defaultModel` | `string` | 默认模型覆盖。 |
 | `model.requestTimeoutMs` | `number` | 模型 HTTP 超时。 |
@@ -475,6 +476,8 @@ export type EkkoProfileMemoryForgetInput = ProfileMemoryInput<MemoryForgetInput>
 
 export type EkkoProfileMemoryWriteInput = ProfileMemoryInput<MemoryWriteInput>
 
+export type EkkoProfileMemoryBatchInput = ProfileMemoryInput<MemoryBatchInput>
+
 export class EkkoProfileDirectoryManager {
   readonly skillDirectory: string
   readonly logDirectory: string
@@ -537,6 +540,7 @@ export class EkkoProfileMemoryManager {
   listMessages(input: MemoryMessageListInput): Promise<MemoryMessage[]>
   listAuditEvents(query: EkkoProfileMemoryAuditQuery = {}): Promise<MemoryAuditEvent[]>
   write(input: EkkoProfileMemoryWriteInput): Promise<MemoryWriteResult>
+  applyBatch(input: EkkoProfileMemoryBatchInput): Promise<MemoryBatchResult>
   forget(input: EkkoProfileMemoryForgetInput): Promise<MemoryForgetResult>
   scheduleCapture(identity: EkkoProfileMemoryIdentity, messages: MemoryCaptureMessage[]): void
   drain(): Promise<void>
@@ -711,6 +715,8 @@ export const DEFAULT_AGENT_MAX_STEPS = 90
 
 export const DEFAULT_AGENT_MODEL_MAX_RETRIES = 3
 
+export const DEFAULT_AGENT_TOOL_FAILURE_RECOVERY_THRESHOLD = 3
+
 export const DEFAULT_AGENT_MAX_CONSECUTIVE_TOOL_FAILURES = 6
 
 export const DEFAULT_AGENT_SUBTASK_MAX_STEPS = 30
@@ -756,6 +762,7 @@ export const DEFAULT_COMPRESSION_PROTECT_FIRST_N = 3
 export interface EkkoRuntimeConfig {
   maxSteps: number
   maxModelRetries: number
+  toolFailureRecoveryThreshold: number
   maxConsecutiveToolFailures: number
 }
 
@@ -904,7 +911,7 @@ export interface EkkoConfig {
 
 export type EkkoConfigPatch = { schemaVersion?: number runtime?: Partial<EkkoRuntimeConfig> model?: Partial<Omit<EkkoModelConfig, 'providerCatalog' | 'disabledProviderPresets' | 'providers' | 'authorizations'>> & { providerCatalog?: Record<string, EkkoModelProviderPreset> disabledProviderPresets?: string[] providers?: Record<string, EkkoModelProviderSettings> authorizations?: Record<string, EkkoModelAuthorizationSettings> } tools?: Partial<Omit<EkkoToolsConfig, 'approvals' | 'codeExec'>> & { approvals?: Partial<EkkoToolApprovalConfig> codeExec?: Partial<EkkoCodeExecConfig> } mcp?: Partial<Omit<EkkoMcpConfig, 'profiles'>> & { profiles?: Record<string, EkkoMcpProfileConfig> } delegation?: Partial<EkkoDelegationConfig> compression?: Partial<EkkoCompressionConfig> memory?: Partial<EkkoMemoryConfig> skills?: Partial<Omit<EkkoSkillsConfig, 'profiles'>> & { profiles?: Record<string, Partial<EkkoSkillsProfileConfig>> } logging?: Partial<EkkoLoggingConfig> prompt?: Partial<EkkoPromptConfig> }
 
-export const DEFAULT_EKKO_CONFIG: EkkoConfig = { schemaVersion: EKKO_CONFIG_SCHEMA_VERSION, runtime: { maxSteps: DEFAULT_AGENT_MAX_STEPS, maxModelRetries: DEFAULT_AGENT_MODEL_MAX_RETRIES, maxConsecutiveToolFailures: DEFAULT_AGENT_MAX_CONSECUTIVE_TOOL_FAILURES, }, model: { defaultProvider: '', defaultModel: '', requestTimeoutMs: DEFAULT_MODEL_REQUEST_TIMEOUT_MS, reasoningEffort: 'medium', reasoningSummary: 'auto', authorizationRefreshLeewayMs: DEFAULT_MODEL_AUTHORIZATION_REFRESH_LEEWAY_MS, providerCatalog: structuredClone(BUILTIN_MODEL_PROVIDER_PRESETS), disabledProviderPresets: [], providers: {}, authorizations: {}, }, tools: { enabled: true, executionTimeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS, approvals: { enabled: true, timeoutMs: DEFAULT_TOOL_APPROVAL_TIMEOUT_MS, permanentAllow: [], }, codeExec: { enabled: true, languages: [...DEFAULT_CODE_EXEC_LANGUAGES], timeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS, maxToolCalls: DEFAULT_CODE_EXEC_MAX_TOOL_CALLS, maxOutputBytes: DEFAULT_CODE_EXEC_MAX_OUTPUT_BYTES, maxStderrBytes: DEFAULT_CODE_EXEC_MAX_STDERR_BYTES, maxSourceBytes: DEFAULT_CODE_EXEC_MAX_SOURCE_BYTES, }, }, mcp: { enabled: true, profiles: {}, }, delegation: { backgroundEnabled: true, subtaskMaxSteps: DEFAULT_AGENT_SUBTASK_MAX_STEPS, }, compression: { enabled: true, threshold: DEFAULT_COMPRESSION_THRESHOLD, targetRatio: DEFAULT_COMPRESSION_TARGET_RATIO, protectLastN: DEFAULT_COMPRESSION_PROTECT_LAST_N, protectFirstN: DEFAULT_COMPRESSION_PROTECT_FIRST_N, }, memory: { enabled: true, recentMessageLimit: DEFAULT_MEMORY_RECENT_MESSAGE_LIMIT, automaticRecallTokenBudget: DEFAULT_AUTOMATIC_MEMORY_TOKEN_BUDGET, searchResultLimit: DEFAULT_MEMORY_SEARCH_RESULT_LIMIT, }, skills: { enabled: true, reviewEveryToolCalls: DEFAULT_SKILL_REVIEW_TOOL_CALL_INTERVAL, profiles: {}, }, logging: { maxBytes: DEFAULT_EKKO_LOG_MAX_BYTES, }, prompt: { instructions: [], }, }
+export const DEFAULT_EKKO_CONFIG: EkkoConfig = { schemaVersion: EKKO_CONFIG_SCHEMA_VERSION, runtime: { maxSteps: DEFAULT_AGENT_MAX_STEPS, maxModelRetries: DEFAULT_AGENT_MODEL_MAX_RETRIES, toolFailureRecoveryThreshold: DEFAULT_AGENT_TOOL_FAILURE_RECOVERY_THRESHOLD, maxConsecutiveToolFailures: DEFAULT_AGENT_MAX_CONSECUTIVE_TOOL_FAILURES, }, model: { defaultProvider: '', defaultModel: '', requestTimeoutMs: DEFAULT_MODEL_REQUEST_TIMEOUT_MS, reasoningEffort: 'medium', reasoningSummary: 'auto', authorizationRefreshLeewayMs: DEFAULT_MODEL_AUTHORIZATION_REFRESH_LEEWAY_MS, providerCatalog: structuredClone(BUILTIN_MODEL_PROVIDER_PRESETS), disabledProviderPresets: [], providers: {}, authorizations: {}, }, tools: { enabled: true, executionTimeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS, approvals: { enabled: true, timeoutMs: DEFAULT_TOOL_APPROVAL_TIMEOUT_MS, permanentAllow: [], }, codeExec: { enabled: true, languages: [...DEFAULT_CODE_EXEC_LANGUAGES], timeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS, maxToolCalls: DEFAULT_CODE_EXEC_MAX_TOOL_CALLS, maxOutputBytes: DEFAULT_CODE_EXEC_MAX_OUTPUT_BYTES, maxStderrBytes: DEFAULT_CODE_EXEC_MAX_STDERR_BYTES, maxSourceBytes: DEFAULT_CODE_EXEC_MAX_SOURCE_BYTES, }, }, mcp: { enabled: true, profiles: {}, }, delegation: { backgroundEnabled: true, subtaskMaxSteps: DEFAULT_AGENT_SUBTASK_MAX_STEPS, }, compression: { enabled: true, threshold: DEFAULT_COMPRESSION_THRESHOLD, targetRatio: DEFAULT_COMPRESSION_TARGET_RATIO, protectLastN: DEFAULT_COMPRESSION_PROTECT_LAST_N, protectFirstN: DEFAULT_COMPRESSION_PROTECT_FIRST_N, }, memory: { enabled: true, recentMessageLimit: DEFAULT_MEMORY_RECENT_MESSAGE_LIMIT, automaticRecallTokenBudget: DEFAULT_AUTOMATIC_MEMORY_TOKEN_BUDGET, searchResultLimit: DEFAULT_MEMORY_SEARCH_RESULT_LIMIT, }, skills: { enabled: true, reviewEveryToolCalls: DEFAULT_SKILL_REVIEW_TOOL_CALL_INTERVAL, profiles: {}, }, logging: { maxBytes: DEFAULT_EKKO_LOG_MAX_BYTES, }, prompt: { instructions: [], }, }
 
 export function serializeDefaultEkkoConfig(): string
 ```
@@ -1619,6 +1626,7 @@ export class MemoryService {
   async listMessages(input: MemoryMessageListInput): Promise<MemoryMessage[]>
   async listAuditEvents(query: MemoryAuditQuery = {}): Promise<MemoryAuditEvent[]>
   async write(input: MemoryWriteInput): Promise<MemoryWriteResult>
+  async applyBatch(input: MemoryBatchInput): Promise<MemoryBatchResult>
   async forget(input: MemoryForgetInput): Promise<MemoryForgetResult>
   scheduleCapture(identity: MemoryRuntimeIdentity, messages: MemoryCaptureMessage[], writePolicy: MemoryWritePolicy = 'automatic'): void
   async drain(): Promise<void>
@@ -1647,6 +1655,7 @@ export class SqliteMemoryStore implements MemoryStore {
   async supersedeNode(input: { oldNodeId: string; newNode: MemoryNode; reason: string; actor: string; sessionId?: string }): Promise<void>
   async updateNodeStatus(input: { nodeId: string; status: MemoryNode['status']; reason: string; actor: string; expectedRevision?: number; sessionId?: string }): Promise<boolean>
   async deleteNode(input: { nodeId: string; mode: 'soft' | 'hard'; reason: string; actor: string; expectedRevision?: number; sessionId?: string }): Promise<boolean>
+  async applyMutations(mutations: MemoryStoreMutation[]): Promise<void>
   async queryNodes(query: MemoryQuery): Promise<MemoryNode[]>
   async appendAuditEvent(event: MemoryAuditEvent): Promise<void>
   async listAuditEvents(query: MemoryAuditQuery = {}): Promise<MemoryAuditEvent[]>
@@ -1837,6 +1846,23 @@ export interface MemoryWriteResult {
   reason?: string
 }
 
+export type MemoryBatchOperation = | Omit<MemoryWriteInput, 'actor' | 'identity'> | { operation: 'delete' targetId: string expectedRevision: number mode?: 'soft' | 'hard' reason: string }
+
+export interface MemoryBatchInput {
+  operations: MemoryBatchOperation[]
+  actor?: string
+  explicitUserIntent?: boolean
+  identity?: Partial<MemoryRuntimeIdentity>
+}
+
+export interface MemoryBatchResult {
+  accepted: boolean
+  done: boolean
+  results: MemoryWriteResult[]
+  failedOperationIndex?: number
+  reason?: string
+}
+
 export interface MemoryCreateInput {
   kind: MemoryKind
   itemKey?: string
@@ -1898,6 +1924,8 @@ export interface MemoryForgetResult {
   reason?: string
 }
 
+export type MemoryStoreMutation = | { type: 'upsert' node: MemoryNode audit?: Omit<MemoryAuditEvent, 'id' | 'nodeId' | 'createdAt'> } | { type: 'supersede' oldNodeId: string newNode: MemoryNode reason: string actor: string sessionId?: string } | { type: 'status' nodeId: string status: MemoryNodeStatus reason: string actor: string expectedRevision?: number sessionId?: string updatedAt?: string } | { type: 'delete' nodeId: string mode: 'soft' | 'hard' reason: string actor: string expectedRevision?: number sessionId?: string updatedAt?: string }
+
 export interface MemoryStore {
   appendMessage(message: MemoryMessage): Promise<void>
   listRecentMessages(input: { sessionId: string; limit: number }): Promise<MemoryMessage[]>
@@ -1907,6 +1935,7 @@ export interface MemoryStore {
   supersedeNode(input: { oldNodeId: string; newNode: MemoryNode; reason: string; actor: string; sessionId?: string }): Promise<void>
   updateNodeStatus(input: { nodeId: string; status: MemoryNodeStatus; reason: string; actor: string; expectedRevision?: number; sessionId?: string }): Promise<boolean>
   deleteNode(input: { nodeId: string; mode: 'soft' | 'hard'; reason: string; actor: string; expectedRevision?: number; sessionId?: string }): Promise<boolean>
+  applyMutations(mutations: MemoryStoreMutation[]): Promise<void>
   queryNodes(query: MemoryQuery): Promise<MemoryNode[]>
   appendAuditEvent(event: MemoryAuditEvent): Promise<void>
   listAuditEvents(query?: MemoryAuditQuery): Promise<MemoryAuditEvent[]>
@@ -2493,7 +2522,7 @@ export class EkkoRecoveryService {
 ### `src/runtime/events.ts`
 
 ```ts
-export type AgentRuntimeEvent = | { type: 'run.started'; runId: string; maxSteps: number } | { type: 'memory.retrieved'; runId: string; diagnostics: MemoryContextDiagnostics; memoryIds: string[] } | { type: 'skill.review.started'; runId: string; reviewId: string } | { type: 'skill.review.completed'; runId: string; reviewId: string; mutations: number } | { type: 'skill.review.failed'; runId: string; reviewId: string; error: string } | { type: 'model.started'; runId: string; step: number } | { type: 'context.estimated'; runId: string; step: number; estimate: AgentRuntimeContextEstimate } | { type: 'model.retry'; runId: string; step: number; retry: number; maxRetries: number; error: string } | { type: 'model.message'; runId: string; step: number; message: AgentOutputMessage } | { type: 'model.delta'; runId: string; step: number; text: string } | { type: 'model.reasoning'; runId: string; step: number; text: string } | { type: 'model.tool_call'; runId: string; step: number; toolCall: AgentToolCall } | { type: 'model.usage'; runId: string; step: number; usage: ModelUsage } | { type: 'model.context'; runId: string; step: number; context: unknown } | { type: 'tool.started'; runId: string; step: number; toolCallId: string; toolName: string; arguments: Record<string, unknown> } | { type: 'tool.completed'; runId: string; step: number; toolCallId: string; toolName: string; result: AgentToolResult; durationMs: number } | { type: 'tool.failed'; runId: string; step: number; toolCallId: string; toolName: string; result: AgentToolResult; durationMs: number } | { type: 'subagent.start'; runId: string; subagentId: string; goal: string; background: boolean; model?: string; startedAt: number } | { type: 'subagent.text'; runId: string; childRunId?: string; subagentId: string; goal: string; background: boolean; text: string } | { type: 'subagent.thinking'; runId: string; childRunId?: string; subagentId: string; goal: string; background: boolean; text: string } | { type: 'subagent.tool'; runId: string; childRunId?: string; subagentId: string; goal: string; background: boolean; toolName: string; arguments: Record<string, unknown>; toolCount: number } | { type: 'subagent.complete' runId: string childRunId?: string subagentId: string goal: string background: boolean status: 'completed' | 'failed' | 'interrupted' summary: string output: string outputTail: string durationMs: number toolCount: number apiCalls: number inputTokens: number outputTokens: number cacheReadTokens: number cacheWriteTokens: number reasoningTokens: number continuationContext?: EkkoBackgroundContinuationContext } | { type: 'run.tool_failure_limit'; runId: string; failures: number } | { type: 'run.completed'; runId: string; output: AgentOutputMessage; steps: number; context?: unknown; contextEstimate?: AgentRuntimeContextEstimate } | { type: 'run.failed'; runId: string; error: string; steps: number } | { type: 'run.max_steps'; runId: string; maxSteps: number }
+export type AgentRuntimeEvent = | { type: 'run.started'; runId: string; maxSteps: number } | { type: 'memory.retrieved'; runId: string; diagnostics: MemoryContextDiagnostics; memoryIds: string[] } | { type: 'skill.review.started'; runId: string; reviewId: string } | { type: 'skill.review.completed'; runId: string; reviewId: string; mutations: number } | { type: 'skill.review.failed'; runId: string; reviewId: string; error: string } | { type: 'model.started'; runId: string; step: number } | { type: 'context.estimated'; runId: string; step: number; estimate: AgentRuntimeContextEstimate } | { type: 'model.retry'; runId: string; step: number; retry: number; maxRetries: number; error: string } | { type: 'model.message'; runId: string; step: number; message: AgentOutputMessage } | { type: 'model.delta'; runId: string; step: number; text: string } | { type: 'model.reasoning'; runId: string; step: number; text: string } | { type: 'model.tool_call'; runId: string; step: number; toolCall: AgentToolCall } | { type: 'model.usage'; runId: string; step: number; usage: ModelUsage } | { type: 'model.context'; runId: string; step: number; context: unknown } | { type: 'tool.started'; runId: string; step: number; toolCallId: string; toolName: string; arguments: Record<string, unknown> } | { type: 'tool.completed'; runId: string; step: number; toolCallId: string; toolName: string; result: AgentToolResult; durationMs: number } | { type: 'tool.failed'; runId: string; step: number; toolCallId: string; toolName: string; result: AgentToolResult; durationMs: number } | { type: 'subagent.start'; runId: string; subagentId: string; goal: string; background: boolean; model?: string; startedAt: number } | { type: 'subagent.text'; runId: string; childRunId?: string; subagentId: string; goal: string; background: boolean; text: string } | { type: 'subagent.thinking'; runId: string; childRunId?: string; subagentId: string; goal: string; background: boolean; text: string } | { type: 'subagent.tool'; runId: string; childRunId?: string; subagentId: string; goal: string; background: boolean; toolName: string; arguments: Record<string, unknown>; toolCount: number } | { type: 'subagent.complete' runId: string childRunId?: string subagentId: string goal: string background: boolean status: 'completed' | 'failed' | 'interrupted' summary: string output: string outputTail: string durationMs: number toolCount: number apiCalls: number inputTokens: number outputTokens: number cacheReadTokens: number cacheWriteTokens: number reasoningTokens: number continuationContext?: EkkoBackgroundContinuationContext } | { type: 'run.tool_recovery_required'; runId: string; toolName: string; failures: number } | { type: 'run.completed'; runId: string; output: AgentOutputMessage; steps: number; context?: unknown; contextEstimate?: AgentRuntimeContextEstimate } | { type: 'run.failed'; runId: string; error: string; steps: number } | { type: 'run.max_steps'; runId: string; maxSteps: number }
 ```
 ### `src/runtime/manager.ts`
 
@@ -2535,12 +2564,12 @@ export interface SystemPromptInput {
   skillDiscoveryEnabled?: boolean
   skillManagementEnabled?: boolean
   skillNames?: string[]
-  context?: { provider?: string model?: string profile?: string cwd?: string workspaceRoot?: string }
+  context?: { provider?: string model?: string profile?: string cwd?: string workspaceRoot?: string platform?: NodeJS.Platform arch?: string }
 }
 
 export const EKKO_OUTPUT_FORMAT_GUIDELINES = `## Image and File Output When returning an image, video, or file to the user, use Markdown with an existing local absolute path. - Unix/macOS/WSL image: \`![description](/absolute/path/image.png)\` - Windows image: \`![description](<C:/absolute/path/image.png>)\` - Unix/macOS/WSL file: \`[filename](/absolute/path/file.pdf)\` - Windows file: \`[filename](<C:/absolute/path/file.pdf>)\` - Use forward slashes for Windows paths. - Wrap paths containing spaces, non-ASCII characters, or special characters in angle brackets. - Do not use relative paths or \`file://\` URLs. - Verify that the referenced file exists before returning it.`
 
-export const EKKO_TOOL_EXECUTION_GUIDELINES = `## Tool Execution Treat external commands, language packages, and other prerequisites named by a Skill as requirements, not proof that they are installed. - Before relying on an external dependency whose availability has not already been established, perform a lightweight availability check. - Do not run the primary dependency-based approach merely to discover whether its dependency exists. - Request independent tool calls together in one response. The runtime executes tools marked as parallel-safe concurrently while preserving serial barriers for stateful or dependent work. - When the user asks to execute or evaluate Node.js, JavaScript, or Python source code, use code_exec, including for one-line snippets. Do not probe Node or Python with terminal_exec first; code_exec resolves its runtime. - Use terminal_exec for CLI commands, project scripts, tests, builds, package managers, and other executables. - terminal_exec may use explicit absolute system paths and package-manager forms such as npx --dir. This capability is not limited to workspace files. - By default, keep downloads, clones, archives, extracted repositories, and generated intermediates inside the current workspace. Prefer the workspace's .ekko-tmp directory for disposable files so workspace-scoped file and image tools can inspect them. Use a system or external path only when the user or task explicitly requires it. - Dangerous tool calls may pause for runtime authorization. If authorization is denied, do not retry the operation through another tool or language runtime unless the user explicitly changes that decision. - After terminal_exec reports a [skill_validation] issue, do not claim the Skill installation is complete. Call skill_view for each writable local Skill and repair it with skill_manage until its frontmatter passes validation. Do not mutate read-only external Skill directories. - If a dependency is unavailable, prefer a compatible installed or built-in alternative. Install it only when installation is necessary and appropriate for the user's task. - Verify created artifacts before returning them.`
+export const EKKO_TOOL_EXECUTION_GUIDELINES = `## Tool Execution Treat external commands, language packages, and other prerequisites named by a Skill as requirements, not proof that they are installed. - Before relying on an external dependency whose availability has not already been established, perform a lightweight availability check. - Do not run the primary dependency-based approach merely to discover whether its dependency exists. - Request independent tool calls together in one response. The runtime executes tools marked as parallel-safe concurrently while preserving serial barriers for stateful or dependent work. - When accompanying a tool call with progress text, write a complete standalone sentence. Do not end tool-call preambles with ":" or "：" as though the tool result will complete the sentence; omit the preamble when it adds no value. - When the user asks to execute or evaluate Node.js, JavaScript, or Python source code, use code_exec, including for one-line snippets. Do not probe Node or Python with terminal_exec first; code_exec resolves its runtime. - Use terminal_exec for CLI commands, project scripts, tests, builds, package managers, and other executables. - terminal_exec may use explicit absolute system paths and platform-appropriate package-manager forms. Follow the Command Environment section below; this capability is not limited to workspace files. - By default, keep downloads, clones, archives, extracted repositories, and generated intermediates inside the current workspace. Prefer the workspace's .ekko-tmp directory for disposable files so workspace-scoped file and image tools can inspect them. Use a system or external path only when the user or task explicitly requires it. - Dangerous tool calls may pause for runtime authorization. If authorization is denied, do not retry the operation through another tool or language runtime unless the user explicitly changes that decision. - After terminal_exec reports a [skill_validation] issue, do not claim the Skill installation is complete. Call skill_view for each writable local Skill and repair it with skill_manage until its frontmatter passes validation. Do not mutate read-only external Skill directories. - If a dependency is unavailable, prefer a compatible installed or built-in alternative. Install it only when installation is necessary and appropriate for the user's task. - Verify created artifacts before returning them.`
 
 export const EKKO_CLARIFICATION_GUIDELINES = `## User Clarification When missing user input materially blocks or changes the task, call the clarify tool and wait for the response. - Do not present a blocking clarification question as an ordinary assistant response. - Ask one concise question that collects the necessary information; provide choices only for a short fixed set of answers. - Do not call clarify when a safe, reasonable assumption lets you continue without materially changing the outcome.`
 
@@ -2600,6 +2629,7 @@ export interface AgentRuntimeOptions {
   recoveryDirective?: () => AgentRuntimeRecoveryDirective
   maxSteps?: number
   maxModelRetries?: number
+  toolFailureRecoveryThreshold?: number
   maxConsecutiveToolFailures?: number
   backgroundDelegationEnabled?: boolean
   subtaskMaxSteps?: number
@@ -2618,6 +2648,7 @@ export interface AgentRuntimeRunInput {
   skills?: AgentSkill[]
   maxSteps?: number
   maxModelRetries?: number
+  toolFailureRecoveryThreshold?: number
   maxConsecutiveToolFailures?: number
   toolContext?: AgentToolContext
   model?: string
@@ -2983,9 +3014,13 @@ export function createDelegationTools(): AgentTool[]
 ### `src/tools/files.ts`
 
 ```ts
+export const DEFAULT_READ_FILE_MAX_BYTES = 50_000
+
 export interface ReadFileInput extends Record<string, unknown> {
   path: string
   encoding?: BufferEncoding
+  offset?: number
+  limit?: number
 }
 
 export interface WriteFileInput extends Record<string, unknown> {
@@ -2997,7 +3032,7 @@ export interface WriteFileInput extends Record<string, unknown> {
 
 export class ReadFileTool implements AgentTool<ReadFileInput> {
   readonly concurrency = 'parallel' as const
-  readonly definition = { name: 'read_file', description: 'Read a UTF-8 text file from the workspace.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'File path relative to the current workspace.' }, encoding: { type: 'string', description: 'Text encoding. Defaults to utf8.' }, }, required: ['path'], additionalProperties: false, }, }
+  readonly definition = { name: 'read_file', description: `Read a text file from the local filesystem, reading at most ${DEFAULT_READ_FILE_MAX_BYTES} file bytes per call. Relative paths resolve from the current working directory; absolute paths and paths outside workspaceRoot are supported. Use offset to continue a truncated read.`, parameters: { type: 'object', properties: { path: { type: 'string', description: 'File path. Relative paths resolve from the current working directory; absolute paths are supported.' }, encoding: { type: 'string', description: 'Text encoding. Defaults to utf8.' }, offset: { type: 'number', description: 'Zero-based byte offset. Defaults to 0; use nextOffset from a truncated result to continue.' }, limit: { type: 'number', description: `Maximum file bytes to read (minimum 4). Defaults to and cannot exceed ${DEFAULT_READ_FILE_MAX_BYTES}.` }, }, required: ['path'], additionalProperties: false, }, }
   async execute(input: ReadFileInput, context: AgentToolContext = {}): Promise<AgentToolResult>
 }
 
@@ -3059,6 +3094,8 @@ export function createMcpToolProvider(): AgentToolProvider
 ### `src/tools/path-safety.ts`
 
 ```ts
+export function resolveUnrestrictedToolPath( inputPath: string, context: { cwd?: string; workspaceRoot?: string } = {}, ): string
+
 export function resolveToolPath(inputPath: string, context: { cwd?: string; workspaceRoot?: string } = {}): string
 ```
 ### `src/tools/recovery.ts`
@@ -3185,6 +3222,12 @@ export function skillValidationResult( name: string, content: string, ): { statu
 ### `src/tools/terminal.ts`
 
 ```ts
+export const DEFAULT_TERMINAL_EXEC_MAX_OUTPUT_BYTES = 100_000
+
+export const DEFAULT_TERMINAL_EXEC_MAX_STDERR_BYTES = 25_000
+
+export const DEFAULT_TERMINAL_EXEC_MAX_ARTIFACT_BYTES = 25 * 1024 * 1024
+
 export interface TerminalExecInput extends Record<string, unknown> {
   command: string
   args?: string[]
@@ -3194,10 +3237,14 @@ export interface TerminalExecInput extends Record<string, unknown> {
 
 export interface TerminalExecToolOptions {
   timeoutMs?: number
+  platform?: NodeJS.Platform
+  maxOutputBytes?: number
+  maxStderrBytes?: number
+  maxArtifactBytes?: number
 }
 
 export class TerminalExecTool implements AgentTool<TerminalExecInput> {
-  readonly definition = { name: 'terminal_exec', description: [ 'Run a CLI command, project script, test, build, package manager, or system executable.', 'Prefer command as the executable and args as the argument array; shell string execution is not used.', 'Commands are not confined to the workspace: explicit absolute paths and package-manager forms such as npx --dir are supported.', 'Keep downloads, clones, extracted files, and generated intermediates under the current workspace (prefer .ekko-tmp) when workspace tools need to inspect them.', 'When the user asks to execute or evaluate Node.js, JavaScript, or Python source code, use code_exec instead, even for a one-line snippet.', 'Destructive, privileged, remote-shell, publishing, and other dangerous commands require runtime authorization before execution.', ].join(' '), parameters: { type: 'object', properties: { command: { type: 'string', description: 'Executable command to run. Prefer a bare executable such as "node", "ls", or "/bin/sh".' }, args: { type: 'array', items: { type: 'string' }, description: 'Command arguments.' }, cwd: { type: 'string', description: 'Working directory. Relative paths resolve from the current workspace; explicit absolute system paths are supported.' }, timeoutMs: { type: 'number', description: 'Timeout in milliseconds.' }, }, required: ['command'], additionalProperties: false, }, }
+  readonly definition: AgentTool['definition']
   constructor(options: TerminalExecToolOptions = {})
   async execute(input: TerminalExecInput, context: AgentToolContext = {}): Promise<AgentToolResult>
 }
@@ -3207,10 +3254,16 @@ export function createTerminalTools(options: TerminalExecToolOptions = {}): Agen
 ### `src/tools/tool-result-sanitizer.ts`
 
 ```ts
+export const DEFAULT_TOOL_RESULT_MAX_TEXT_BYTES = 256_000
+
+export const DEFAULT_TOOL_RESULT_MAX_TEXT_ARTIFACT_BYTES = 25 * 1024 * 1024
+
 export interface ToolResultSanitizerOptions {
   tempRoot?: string
   ttlMs?: number
   maxBytes?: number
+  maxTextBytes?: number
+  maxTextArtifactBytes?: number
   now?: number
 }
 
@@ -3335,6 +3388,8 @@ export async function ensureWorkspaceTempRoot( context: Pick<AgentToolContext, '
 export function workspaceTempEnvironment(directory: string): NodeJS.ProcessEnv
 
 export function workspaceToolAssetDirectory( context: Pick<AgentToolContext, 'workspaceRoot' | 'cwd'> = {}, ): string
+
+export async function ensureToolAssetDirectory(directory: string): Promise<string>
 ```
 
 <!-- END GENERATED EKKO PUBLIC API -->

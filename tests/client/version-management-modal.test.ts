@@ -38,6 +38,7 @@ vi.mock('naive-ui', () => ({
 }))
 
 import VersionManagementModal from '@/components/layout/VersionManagementModal.vue'
+import { useRuntimeRestartPrompt } from '@/composables/useRuntimeRestartPrompt'
 
 function runtimeStatus() {
   return {
@@ -75,6 +76,7 @@ function runtimeStatus() {
 
 describe('VersionManagementModal Runtime storage selector', () => {
   beforeEach(() => {
+    useRuntimeRestartPrompt().clearRuntimeRestart()
     for (const mock of Object.values(api)) mock.mockReset()
     selectRuntimeDirectory.mockReset()
     message.success.mockReset()
@@ -134,6 +136,33 @@ describe('VersionManagementModal Runtime storage selector', () => {
 
     expect(wrapper.text()).toContain('0.20.4')
     expect(wrapper.text()).toContain('0.20.0')
+  })
+
+  it('shows a failed Runtime as downloadable even when remote version lookup is unavailable', async () => {
+    const status = {
+      ...runtimeStatus(),
+      active: {
+        schema: 1,
+        runtimeValidationFailures: [{
+          version: '0.20.0',
+          platform: 'mac-arm64',
+          directory: '/state/desktop-runtime/hermes/0.20.0/mac-arm64',
+          reason: 'hermes --version timed out after 5000ms',
+          failedAt: new Date(0).toISOString(),
+        }],
+      },
+    }
+    api.fetchRuntimeVersionStatus.mockResolvedValue(status)
+    const wrapper = mount(VersionManagementModal, { props: { show: false } })
+
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('0.20.0')
+    expect(wrapper.text()).toContain('runtimeVersions.downloadGithub')
+    expect(wrapper.text()).toContain('runtimeVersions.downloadCf')
+    expect(wrapper.text()).not.toContain('runtimeVersions.installed')
+    expect(wrapper.text()).not.toContain('runtimeVersions.useVersion')
   })
 
   it('shows selected user CLI paths in a read-only details drawer', async () => {
@@ -226,7 +255,7 @@ describe('VersionManagementModal Runtime storage selector', () => {
     expect(message.success).toHaveBeenCalledWith('runtimeVersions.runtimeDirectorySaved')
   })
 
-  it('restarts standalone Web UI after selecting an installed Runtime', async () => {
+  it('requests global restart confirmation after selecting an installed Runtime', async () => {
     const status = runtimeStatus()
     status.hermes.remoteVersions = ['0.20.4']
     status.hermes.installed = [{
@@ -247,7 +276,8 @@ describe('VersionManagementModal Runtime storage selector', () => {
     await flushPromises()
 
     expect(api.activateRuntimeVersion).toHaveBeenCalledWith('0.20.4')
-    expect(api.restartWebUiAfterRuntimeChange).toHaveBeenCalledTimes(1)
+    expect(api.restartWebUiAfterRuntimeChange).not.toHaveBeenCalled()
+    expect(useRuntimeRestartPrompt().pendingRuntimeRestart.value?.version).toBe('0.20.4')
     wrapper.unmount()
   })
 })

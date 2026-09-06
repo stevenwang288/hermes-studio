@@ -3,7 +3,7 @@
   "info": {
     "title": "Hermes Studio API",
     "description": "Hermes Studio API — chat sessions, scheduled jobs, platform channels, model management, skills, memory, logs, file browser, group chat, and terminal.",
-    "version": "0.7.12-fork.1"
+    "version": "0.7.17"
   },
   "servers": [
     {
@@ -91,6 +91,10 @@
     {
       "name": "Runtime Versions",
       "description": "Runtime and Web UI version management"
+    },
+    {
+      "name": "Data Migration",
+      "description": "One-time legacy Hermes data migration"
     },
     {
       "name": "Write Gate",
@@ -1695,6 +1699,227 @@
             }
           }
         }
+      }
+    },
+    "/api/coding-agents/{id}/mcp/servers": {
+      "get": {
+        "tags": [
+          "Coding Agents"
+        ],
+        "summary": "Get servers",
+        "description": "GET /api/coding-agents/:id/mcp/servers",
+        "operationId": "listMcpServers",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Coding Agents"
+        ],
+        "summary": "Create servers",
+        "description": "POST /api/coding-agents/:id/mcp/servers",
+        "operationId": "addMcpServer",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/coding-agents/{id}/mcp/servers/{name}": {
+      "patch": {
+        "tags": [
+          "Coding Agents"
+        ],
+        "summary": "Update :name",
+        "description": "PATCH /api/coding-agents/:id/mcp/servers/:name",
+        "operationId": "updateMcpServer",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Coding Agents"
+        ],
+        "summary": "Delete :name",
+        "description": "DELETE /api/coding-agents/:id/mcp/servers/:name",
+        "operationId": "removeMcpServer",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/coding-agents/{id}/mcp/servers/{name}/test": {
+      "post": {
+        "tags": [
+          "Coding Agents"
+        ],
+        "summary": "Create test",
+        "description": "POST /api/coding-agents/:id/mcp/servers/:name/test",
+        "operationId": "testMcpServer",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/api/coding-agents/{id}/runs": {
@@ -5406,6 +5631,74 @@
             }
           }
         ]
+      }
+    },
+    "/api/hermes/data-migrations/windows-appdata": {
+      "get": {
+        "tags": [
+          "Data Migration"
+        ],
+        "summary": "Get windows-appdata",
+        "description": "GET /api/hermes/data-migrations/windows-appdata",
+        "operationId": "status",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Data Migration"
+        ],
+        "summary": "Create windows-appdata",
+        "description": "POST /api/hermes/data-migrations/windows-appdata",
+        "operationId": "decide",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "action"
+                ]
+              }
+            }
+          }
+        }
       }
     },
     "/api/hermes/jobs": {
@@ -10766,7 +11059,11 @@
                     "type": "string",
                     "enum": [
                       "claude-code",
-                      "codex"
+                      "codex",
+                      "pi",
+                      "grok",
+                      "opencode",
+                      "ekko-agent"
                     ],
                     "description": "Coding agent id when source is coding_agent."
                   },
@@ -10774,7 +11071,11 @@
                     "type": "string",
                     "enum": [
                       "claude-code",
-                      "codex"
+                      "codex",
+                      "pi",
+                      "grok",
+                      "opencode",
+                      "ekko-agent"
                     ],
                     "description": "Alias for coding_agent_id."
                   },
@@ -12774,6 +13075,9 @@
                   "agent": {
                     "type": "string"
                   },
+                  "agentMode": {
+                    "type": "string"
+                  },
                   "apiMode": {
                     "type": "string"
                   },
@@ -14557,6 +14861,44 @@
                     "type": "number"
                   }
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/mobile-location/request": {
+      "post": {
+        "tags": [
+          "Chat Run"
+        ],
+        "summary": "Create request",
+        "description": "POST /api/studio/mobile-location/request",
+        "operationId": "requestMobileLocation",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
               }
             }
           }

@@ -66,6 +66,7 @@ const tagMappings = {
   'modules/studio/routes/download.ts': { name: 'Studio Files', description: 'Studio file download' },
   'modules/hermes/routes/mcp.ts': { name: 'MCP', description: 'MCP server and tool management' },
   'modules/hermes/routes/runtime-versions.ts': { name: 'Runtime Versions', description: 'Runtime and Web UI version management' },
+  'modules/hermes/routes/legacy-data-migration.ts': { name: 'Data Migration', description: 'One-time legacy Hermes data migration' },
   'modules/hermes/routes/write-gate.ts': { name: 'Write Gate', description: 'Hermes Agent write approval review' },
   'modules/hermes/routes/journey.ts': { name: 'Journey', description: 'Hermes Agent learning journey graph' },
   'modules/ekko/routes/memory.ts': { name: 'Ekko Memory', description: 'Ekko durable memory management' },
@@ -959,12 +960,12 @@ openapi.paths['/api/studio/chat-run/runs'] = {
               },
               coding_agent_id: {
                 type: 'string',
-                enum: ['claude-code', 'codex'],
+                enum: ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'ekko-agent'],
                 description: 'Coding agent id when source is coding_agent.',
               },
               agent_id: {
                 type: 'string',
-                enum: ['claude-code', 'codex'],
+                enum: ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'ekko-agent'],
                 description: 'Alias for coding_agent_id.',
               },
               mode: {

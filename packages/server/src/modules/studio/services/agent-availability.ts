@@ -11,6 +11,8 @@ const AGENT_ALIASES: Record<string, AgentStatusId> = {
   'claude-code': 'claude-code',
   codex: 'codex',
   pi: 'pi',
+  grok: 'grok',
+  opencode: 'opencode',
 }
 
 const AGENT_NAMES: Record<AgentStatusId, string> = {
@@ -19,6 +21,8 @@ const AGENT_NAMES: Record<AgentStatusId, string> = {
   'claude-code': 'Claude',
   codex: 'Codex',
   pi: 'Pi',
+  grok: 'Grok',
+  opencode: 'OpenCode',
 }
 
 export const AGENT_NOT_INSTALLED = 'AGENT_NOT_INSTALLED'

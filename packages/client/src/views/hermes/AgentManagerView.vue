@@ -13,11 +13,16 @@ import {
   type CodingAgentUpdateResult,
 } from '@/api/coding-agents'
 import { fetchAgentStatusSnapshot, type AgentStatusSnapshot } from '@/api/agent-status'
+import {
+  decideLegacyWindowsDataMigration,
+  fetchLegacyWindowsDataMigrationStatus,
+} from '@/api/hermes/legacy-data-migration'
 import { fetchRuntimeVersionStatus, type RuntimeVersionStatus } from '@/api/hermes/runtime-versions'
 import HermesDataDirectoryHint from '@/components/hermes/HermesDataDirectoryHint.vue'
 import VersionManagementModal from '@/components/layout/VersionManagementModal.vue'
 import { useAppStore } from '@/stores/hermes/app'
 import { useChatStore } from '@/stores/hermes/chat'
+import { desktopBridge } from '@/utils/desktop-bridge'
 
 const AiHelpChatPanel = defineAsyncComponent(async () => (await import('@/components/hermes/chat/ChatPanel.vue')).default)
 
@@ -63,6 +68,22 @@ const codingAgents: CodingAgentCard[] = [
     command: 'pi',
     packageName: '@earendil-works/pi-coding-agent',
   },
+  {
+    id: 'grok',
+    name: 'Grok',
+    provider: 'xAI',
+    logo: '/coding-agents/grok.svg',
+    command: 'grok',
+    packageName: '@xai-official/grok',
+  },
+  {
+    id: 'opencode',
+    name: 'OpenCode',
+    provider: 'OpenCode',
+    logo: '/coding-agents/opencode.png',
+    command: 'opencode',
+    packageName: 'opencode-ai',
+  },
 ]
 
 const { t } = useI18n()
@@ -83,13 +104,16 @@ const hermesCliDetailsLoading = ref(false)
 const hermesRuntimeStatus = ref<RuntimeVersionStatus | null>(null)
 const aiHelpDrawerVisible = ref(false)
 const aiHelpPrompt = ref('')
-const installing = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false })
-const deleting = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false })
-const checkingUpdate = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false })
+const legacyDataMigrationChecked = ref(false)
+const installing = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false })
+const deleting = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false })
+const checkingUpdate = ref<Record<CodingAgentId, boolean>>({ 'claude-code': false, codex: false, pi: false, grok: false, opencode: false })
 const updateInfo = ref<Record<CodingAgentId, CodingAgentUpdateResult | null>>({
   'claude-code': null,
   codex: null,
   pi: null,
+  grok: null,
+  opencode: null,
 })
 
 const hermesStatus = computed(() => agentStatusSnapshot.value?.agents.find(agent => agent.id === 'hermes'))
@@ -266,6 +290,56 @@ async function openHermesCliDetails() {
   }
 }
 
+async function submitLegacyDataMigrationDecision(action: 'migrate' | 'decline'): Promise<boolean> {
+  try {
+    await decideLegacyWindowsDataMigration(action)
+    if (action === 'migrate') {
+      const bridge = desktopBridge()
+      if (!bridge?.restartApp) throw new Error('Desktop restart is unavailable')
+      message.success(t('agentManager.legacyDataMigrationSuccess'))
+      await bridge.restartApp()
+    }
+    return true
+  } catch (error) {
+    message.error(t('agentManager.legacyDataMigrationFailed', { error: errorMessage(error) }))
+    return false
+  }
+}
+
+async function maybePromptLegacyWindowsDataMigration() {
+  const bridge = desktopBridge()
+  if (legacyDataMigrationChecked.value || bridge?.isDesktop !== true || bridge.platform !== 'win32') return
+  legacyDataMigrationChecked.value = true
+
+  try {
+    const status = await fetchLegacyWindowsDataMigrationStatus()
+    if (!status.shouldPrompt) return
+
+    dialog.warning({
+      title: t('agentManager.legacyDataMigrationTitle'),
+      content: () => h('div', { class: 'legacy-data-migration-dialog' }, [
+        h('p', t('agentManager.legacyDataMigrationDescription')),
+        h('dl', [
+          h('dt', t('agentManager.legacyDataMigrationSource')),
+          h('dd', [h('code', status.sourceDirectory)]),
+          h('dt', t('agentManager.legacyDataMigrationTarget')),
+          h('dd', [h('code', status.targetDirectory)]),
+        ]),
+        h('p', { class: 'legacy-data-migration-warning' }, t('agentManager.legacyDataMigrationWarning')),
+      ]),
+      positiveText: t('agentManager.legacyDataMigrationPositive'),
+      negativeText: t('agentManager.legacyDataMigrationNegative'),
+      closable: false,
+      maskClosable: false,
+      closeOnEsc: false,
+      onPositiveClick: () => submitLegacyDataMigrationDecision('migrate'),
+      onNegativeClick: () => submitLegacyDataMigrationDecision('decline'),
+    })
+  } catch (error) {
+    console.warn('[agent-manager] failed to check legacy Windows Hermes data migration', error)
+  }
+}
+
 async function handleInstall(id: CodingAgentId) {
   installing.value[id] = true
   try {
@@ -318,6 +392,7 @@ onMounted(() => {
     void router.replace({ query })
   }
   void loadCachedStatus()
+  void maybePromptLegacyWindowsDataMigration()
 })
 </script>
 
@@ -414,6 +489,14 @@ onMounted(() => {
 
             <div class="agent-actions">
               <NButton
+                v-if="hermesDetected"
+                secondary
+                size="small"
+                @click="router.push({ name: 'hermes.configSettings' })"
+              >
+                {{ t('sidebar.settings') }}
+              </NButton>
+              <NButton
                 v-if="hermesDetected && hermesType === 'CLI'"
                 data-testid="view-hermes-cli-details"
                 secondary
@@ -431,14 +514,6 @@ onMounted(() => {
                 @click="runtimeManagerVisible = true"
               >
                 {{ hermesDetected ? t('agentManager.manageRuntime') : t('codingAgents.installNow') }}
-              </NButton>
-              <NButton
-                v-if="hermesDetected"
-                secondary
-                size="small"
-                @click="router.push({ name: 'hermes.configSettings' })"
-              >
-                {{ t('sidebar.settings') }}
               </NButton>
             </div>
           </section>
@@ -473,6 +548,17 @@ onMounted(() => {
               </header>
 
               <div class="agent-actions">
+                <NButton
+                  secondary
+                  size="small"
+                  :data-testid="`agent-settings-${agent.id}`"
+                  @click="router.push({
+                    name: 'codingAgent.config',
+                    params: { agentId: agent.id, section: 'settings' },
+                  })"
+                >
+                  {{ t('sidebar.settings') }}
+                </NButton>
                 <NButton
                   v-if="!toolStatus(agent.id)?.installed"
                   type="primary"
@@ -611,6 +697,35 @@ onMounted(() => {
 
 :global(.agent-ai-help-dialog p) {
   margin: 0 0 12px;
+}
+
+:global(.legacy-data-migration-dialog p) {
+  margin: 0 0 12px;
+}
+
+:global(.legacy-data-migration-dialog dl) {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 12px;
+  margin: 0 0 12px;
+}
+
+:global(.legacy-data-migration-dialog dt) {
+  color: var(--text-color-2);
+}
+
+:global(.legacy-data-migration-dialog dd) {
+  min-width: 0;
+  margin: 0;
+}
+
+:global(.legacy-data-migration-dialog code) {
+  overflow-wrap: anywhere;
+}
+
+:global(.legacy-data-migration-dialog .legacy-data-migration-warning) {
+  margin-bottom: 0;
+  color: var(--warning-color);
 }
 
 :global(.agent-ai-help-error) {

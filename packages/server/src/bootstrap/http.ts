@@ -62,6 +62,7 @@ import { createCodexProxyRequestBodyParser, createRequestBodyParser } from '../m
 import {
   getCodingAgentsStatus,
   migratePersistedPiRuntimeMcpConfigs,
+  restorePersistedCodexProxyTargets,
   restorePersistedPiProxyTargets,
 } from './coding-agents'
 import { isAuthorizedCodexProxyRequest } from '../modules/coding-agents/services/codex/proxy'
@@ -70,9 +71,11 @@ import {
   readLockedDesktopHermesSelection,
   type HermesRuntimeSelection,
 } from '../modules/hermes/services/runtime/selection'
-import { configureRuntimeInstallCompletedHandler, getRuntimeVersionStatus } from '../modules/hermes/services/runtime/version-manager'
+import {
+  getRuntimeVersionStatus,
+  readActiveVersionManifest,
+} from '../modules/hermes/services/runtime/version-manager'
 import { isHermesAgentAvailable, updateAgentStatus } from '../modules/studio/public/agent-status-registry'
-import { scheduleWebUiRestart } from '../modules/studio/public/web-ui-restart'
 
 // Injected by esbuild at build time; fallback to reading package.json in dev mode
 declare const __APP_VERSION__: string
@@ -331,6 +334,7 @@ function startLanDiscovery(): void {
 
 function recordLockedHermesSelection(selection: HermesRuntimeSelection): void {
   if (selection.source === 'none' || !selection.path) {
+    const activationError = readActiveVersionManifest()?.runtimeActivationError || ''
     updateAgentStatus('hermes', {
       name: 'Hermes',
       provider: 'Nous Research',
@@ -339,7 +343,7 @@ function recordLockedHermesSelection(selection: HermesRuntimeSelection): void {
       version: '',
       source: 'not-installed',
       path: '',
-      error: '',
+      error: activationError,
       installations: [],
     })
     return
@@ -398,16 +402,6 @@ export async function bootstrap() {
   }
   const hermesAgentAvailable = isHermesAgentAvailable()
   console.log(`[bootstrap] Hermes Agent inventory status=${hermesAgentAvailable ? 'available' : 'not-installed'}`)
-  configureRuntimeInstallCompletedHandler(() => {
-    if (isDesktopRuntime()) {
-      setTimeout(() => {
-        void getShutdownHandler()('runtime-installed', 75)
-      }, 250).unref?.()
-      return
-    }
-    scheduleWebUiRestart()
-  })
-
   await initLoginLimiter()
   if (skillInjectionDisabled()) {
     console.log('[bootstrap] bundled skill injection disabled by HERMES_WEB_UI_DISABLE_SKILL_INJECTION')
@@ -447,6 +441,15 @@ export async function bootstrap() {
     }
   } catch (err) {
     logger.warn(err, '[bootstrap] failed to migrate persisted Pi MCP runtime configs')
+  }
+
+  try {
+    const restoredCodexProxyTargets = await restorePersistedCodexProxyTargets()
+    if (restoredCodexProxyTargets > 0) {
+      console.log(`[bootstrap] restored ${restoredCodexProxyTargets} persisted Codex/Grok proxy target(s)`)
+    }
+  } catch (err) {
+    logger.warn(err, '[bootstrap] failed to restore persisted Codex/Grok proxy targets')
   }
 
   try {

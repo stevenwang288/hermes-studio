@@ -1,4 +1,4 @@
-export type AgentStatusId = 'hermes' | 'ekko-agent' | 'claude-code' | 'codex' | 'pi'
+export type AgentStatusId = 'hermes' | 'ekko-agent' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode'
 
 export type AgentStatusSource =
   | 'managed-runtime'
@@ -46,7 +46,7 @@ export interface AgentAvailabilitySnapshot {
   agents: AgentAvailabilityRecord[]
 }
 
-const AGENT_ORDER: AgentStatusId[] = ['hermes', 'ekko-agent', 'claude-code', 'codex', 'pi']
+const AGENT_ORDER: AgentStatusId[] = ['hermes', 'ekko-agent', 'claude-code', 'codex', 'pi', 'grok', 'opencode']
 
 const DEFAULTS: Record<AgentStatusId, Omit<AgentStatusRecord, 'updatedAt'>> = {
   hermes: {
@@ -101,6 +101,30 @@ const DEFAULTS: Record<AgentStatusId, Omit<AgentStatusRecord, 'updatedAt'>> = {
     id: 'pi',
     name: 'Pi',
     provider: 'Pi',
+    kind: 'coding-agent',
+    installed: false,
+    version: '',
+    source: 'not-installed',
+    path: '',
+    error: '',
+    installations: [],
+  },
+  opencode: {
+    id: 'opencode',
+    name: 'OpenCode',
+    provider: 'OpenCode',
+    kind: 'coding-agent',
+    installed: false,
+    version: '',
+    source: 'not-installed',
+    path: '',
+    error: '',
+    installations: [],
+  },
+  grok: {
+    id: 'grok',
+    name: 'Grok',
+    provider: 'xAI',
     kind: 'coding-agent',
     installed: false,
     version: '',

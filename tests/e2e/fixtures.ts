@@ -79,6 +79,7 @@ interface MockHermesApiOptions {
   socialMessageFeishuRecipients?: Record<string, unknown>
   socialMessageTelegramRecipients?: Record<string, unknown>
   socialMessageWeixinRecipients?: Record<string, unknown>
+  ttsActiveProviders?: Partial<Record<'default' | 'research', string>>
 }
 
 export const TEST_MODEL_GROUP = {
@@ -218,6 +219,7 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
           { id: 'claude-code', name: 'Claude', provider: 'Anthropic', kind: 'coding-agent', installed: true, version: '1.0.0', source: 'user-cli', path: '/usr/local/bin/claude', error: '', installations: [] },
           { id: 'codex', name: 'Codex', provider: 'OpenAI', kind: 'coding-agent', installed: true, version: '1.0.0', source: 'user-cli', path: '/usr/local/bin/codex', error: '', installations: [] },
           { id: 'pi', name: 'Pi', provider: 'Pi', kind: 'coding-agent', installed: true, version: '1.0.0', source: 'user-cli', path: '/usr/local/bin/pi', error: '', installations: [] },
+          { id: 'grok', name: 'Grok', provider: 'xAI', kind: 'coding-agent', installed: true, version: '1.0.0', source: 'user-cli', path: '/usr/local/bin/grok', error: '', installations: [] },
         ],
       }))
       return
@@ -233,6 +235,7 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
           { id: 'claude-code', installed: true, source: 'user-cli' },
           { id: 'codex', installed: true, source: 'user-cli' },
           { id: 'pi', installed: true, source: 'user-cli' },
+          { id: 'grok', installed: true, source: 'user-cli' },
         ],
       }))
       return
@@ -271,6 +274,11 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
           remoteVersions: [],
         },
       }))
+      return
+    }
+
+    if (pathname === '/api/hermes/runtime-versions/jobs' && request.method() === 'GET') {
+      await route.fulfill(jsonResponse({ jobs: [] }))
       return
     }
 
@@ -353,6 +361,15 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
         return
       }
       await route.fulfill(jsonResponse({ error: 'Method not allowed' }, 405))
+      return
+    }
+
+    if (pathname === '/api/studio/tts/settings' && request.method() === 'GET') {
+      const profile = request.headers()['x-hermes-profile'] === 'research' ? 'research' : 'default'
+      await route.fulfill(jsonResponse({
+        settings: [],
+        activeProvider: options.ttsActiveProviders?.[profile] || 'edge',
+      }))
       return
     }
 
@@ -856,13 +873,14 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
     if (pathname === '/api/studio/versions' && request.method() === 'GET') {
       await route.fulfill(jsonResponse({
         schema: 1,
+        accessMode: 'public_beta',
         hermes: [],
         mobile: {
           version: '1.0.0',
           channels: {
-            androidApk: { githubUrl: '', cloudflareUrl: '', online: false },
-            googlePlay: { url: '', online: false },
-            apple: { testFlightUrl: '', appStoreUrl: '', online: false },
+            androidApk: { version: '1.0.0', githubUrl: '', cloudflareUrl: '', online: false },
+            googlePlay: { version: '1.0.1', url: '', online: false },
+            apple: { version: '1.1.0', testFlightUrl: '', appStoreUrl: '', online: false },
             harmony: { url: '', online: false },
           },
         },
@@ -894,7 +912,7 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
 
     if (
       request.method() === 'GET' &&
-      /^\/api\/coding-agents\/(?:claude-code|codex|pi)\/config-files\/[^/]+$/.test(pathname)
+      /^\/api\/coding-agents\/(?:claude-code|codex|pi|grok)\/config-files\/[^/]+$/.test(pathname)
     ) {
       const key = pathname.split('/').at(-1) || 'config'
       await route.fulfill(jsonResponse({
