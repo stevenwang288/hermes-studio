@@ -440,9 +440,6 @@ function handleOpenDesktopBrowserPanelRequest() {
   showToolPanel.value = true;
 }
 
-
-
-
 onMounted(() => {
   mobileQuery = window.matchMedia("(max-width: 768px)");
   handleMobileChange(mobileQuery);
@@ -596,14 +593,13 @@ function persistCollapsedCategories() {
   );
 }
 
-// [fork] 分类分组已隐藏，以下函数不再使用
-// function toggleCategoryGroup(key: string) {
-//   const next = new Set(collapsedCategories.value);
-//   if (next.has(key)) next.delete(key);
-//   else next.add(key);
-//   collapsedCategories.value = next;
-//   persistCollapsedCategories();
-// }
+function toggleCategoryGroup(key: string) {
+  const next = new Set(collapsedCategories.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  collapsedCategories.value = next;
+  persistCollapsedCategories();
+}
 const profileFilterOptions = computed(() => [
   { label: t("chat.allProfiles"), value: "__all__" },
   ...profilesStore.profiles.map((profile) => ({
@@ -632,10 +628,7 @@ const recentSessionPartition = computed(() => partitionRecentSessions(
   t("chat.recent"),
 ));
 const recentSessions = computed(() => recentSessionPartition.value.group);
-const nonRecentSessions = computed(() => {
-  const recentIds = new Set(recentSessions.value.sessions.map(s => s.id));
-  return recentSessionPartition.value.remaining.filter(s => !recentIds.has(s.id));
-});
+const nonRecentSessions = computed(() => recentSessionPartition.value.remaining);
 const sessionCategoryNames = computed(() => new Map(
   sessionCategories.value.map(category => [category.id, category.name]),
 ));
@@ -1465,19 +1458,18 @@ const showRenameCategoryModal = ref(false);
 const renameCategoryValue = ref("");
 const showDeleteCategoryModal = ref(false);
 
-// [fork] 分类分组已隐藏，以下函数不再使用
-// function handleCategoryContextMenu(event: MouseEvent, groupKey: string) {
-//   if (groupKey === "category-none") return;
-//   const categoryId = Number(groupKey.slice("category-".length));
-//   if (!Number.isSafeInteger(categoryId)) return;
-//   event.preventDefault();
-//   event.stopPropagation();
-//   showContextMenu.value = false;
-//   categoryContextId.value = categoryId;
-//   categoryContextMenuX.value = event.clientX;
-//   categoryContextMenuY.value = event.clientY;
-//   showCategoryContextMenu.value = true;
-// }
+function handleCategoryContextMenu(event: MouseEvent, groupKey: string) {
+  if (groupKey === "category-none") return;
+  const categoryId = Number(groupKey.slice("category-".length));
+  if (!Number.isSafeInteger(categoryId)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  showContextMenu.value = false;
+  categoryContextId.value = categoryId;
+  categoryContextMenuX.value = event.clientX;
+  categoryContextMenuY.value = event.clientY;
+  showCategoryContextMenu.value = true;
+}
 
 function handleCategoryMenuButton(event: MouseEvent, groupKey: string) {
   if (groupKey === "category-none") return;
@@ -1567,8 +1559,6 @@ const contextMenuOptions = computed(() => {
     options.push({ label: t("chat.setModel"), key: "model" })
   }
 
-  // [fork] 分类分组已隐藏，移除"移动到分类"菜单项
-  // 但上游 buildSessionCategoryMenuChildren 是更完善的实现，保留供手动使用
   options.push({
     label: t("chat.moveToCategory"),
     key: "category",
@@ -1584,7 +1574,7 @@ const contextMenuOptions = computed(() => {
     }),
   })
 
-    options.push({
+  options.push({
     label: t("chat.export"),
     key: "export",
     children: [
@@ -2480,17 +2470,15 @@ async function handleSessionModelCustomSubmit() {
       <NInputNumber v-model:value="recentCountDraft" :min="1" :max="100" />
     </NModal>
 
-    <!-- [fork] 分类右键菜单已隐藏 -->
-        <NDropdown
-          v-if="false"
-          placement="bottom-start"
-          trigger="manual"
-          :x="categoryContextMenuX"
+    <NDropdown
+      placement="bottom-start"
+      trigger="manual"
+      :x="categoryContextMenuX"
       :y="categoryContextMenuY"
       :options="categoryContextMenuOptions"
       :show="showCategoryContextMenu"
-            @select="() => {}"
-            @clickoutside="showCategoryContextMenu = false"
+      @select="handleCategoryContextMenuSelect"
+      @clickoutside="showCategoryContextMenu = false"
     />
 
     <NModal
@@ -4006,7 +3994,6 @@ async function handleSessionModelCustomSubmit() {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-width: 0;
 }
 
 .source-badge {
@@ -4063,8 +4050,6 @@ async function handleSessionModelCustomSubmit() {
   gap: 4px;
   overflow: hidden;
   cursor: pointer;
-  flex-shrink: 1;
-  min-width: 0;
 
   svg {
     flex: 0 0 auto;
@@ -4075,11 +4060,7 @@ async function handleSessionModelCustomSubmit() {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    direction: ltr;
-    unicode-bidi: plaintext;
     font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
-    font-size: 10.5px;
-    letter-spacing: -0.1px;
   }
 
   &:hover {
