@@ -62,3 +62,6 @@ NUL
 .playwright-mcp/
 # Windows reserved-name junk from earlier test
 NUL
+
+# Playwright MCP 会话产物
+.playwright-cli/
