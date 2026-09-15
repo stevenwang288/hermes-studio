@@ -16,7 +16,7 @@ import {
   type IpcMainInvokeEvent,
   type WebContents,
 } from 'electron'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   getToken,
@@ -572,7 +572,70 @@ async function createWindow(): Promise<void> {
   } else {
     await mainWindow.loadURL(splashHtml(t('runtime.checking')))
   }
+  installDesktopZoomShortcuts(mainWindow)
   updateTrayMenu()
+}
+
+
+// ── [zoom patch] Windows 桌面端字体缩放 ──────────────────────────────
+// 上游把 Windows/Linux 的原生菜单整体移除了（Menu.setApplicationMenu(null)），
+// 导致 Electron 默认的缩放快捷键 Ctrl+= / Ctrl+- / Ctrl+0 一并失效。
+// 这里在主进程用 before-input-event 重新注册 Ctrl+加号 / Ctrl+减号 / Ctrl+0，
+// 通过 webContents.setZoomLevel() 缩放整个界面字体/UI，并持久化级别。
+// 只对 Windows 生效；macOS 保留系统默认菜单的缩放。
+const ZOOM_STEP = 0.5
+const ZOOM_MIN = -3
+const ZOOM_MAX = 4
+function desktopZoomStatePath(): string {
+  return join(app.getPath('userData'), 'desktop-zoom.json')
+}
+function loadDesktopZoomLevel(): number {
+  try {
+    const parsed = JSON.parse(readFileSync(desktopZoomStatePath(), 'utf8')) as { level?: unknown }
+    const level = Number(parsed?.level)
+    return Number.isFinite(level) ? Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, level)) : 0
+  } catch {
+    return 0
+  }
+}
+function saveDesktopZoomLevel(level: number): void {
+  try {
+    writeFileSync(desktopZoomStatePath(), JSON.stringify({ level }), 'utf8')
+  } catch (err) {
+    console.warn('[desktop-zoom] failed to persist zoom level:', err)
+  }
+}
+function installDesktopZoomShortcuts(target: BrowserWindow): void {
+  if (process.platform !== 'win32') return
+  const applyZoom = (delta: number): void => {
+    if (target.isDestroyed()) return
+    const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, target.webContents.getZoomLevel() + delta))
+    target.webContents.setZoomLevel(next)
+    saveDesktopZoomLevel(next)
+  }
+  const resetZoom = (): void => {
+    if (target.isDestroyed()) return
+    target.webContents.setZoomLevel(0)
+    saveDesktopZoomLevel(0)
+  }
+  target.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || !input.control) return
+    const key = input.key
+    if (key === '+' || key === '=' || key === 'Add') {
+      event.preventDefault()
+      applyZoom(ZOOM_STEP)
+    } else if (key === '-' || key === 'Subtract') {
+      event.preventDefault()
+      applyZoom(-ZOOM_STEP)
+    } else if (key === '0') {
+      event.preventDefault()
+      resetZoom()
+    }
+  })
+  const saved = loadDesktopZoomLevel()
+  if (saved !== 0) {
+    target.webContents.setZoomLevel(saved)
+  }
 }
 
 function normalizeChatWindowValue(value: unknown, maxLength: number): string | null {
@@ -629,6 +692,7 @@ async function openChatWindow(sessionIdInput: unknown, profileInput?: unknown): 
     },
   })
   chatWindows.set(windowKey, chatWindow)
+  installDesktopZoomShortcuts(chatWindow)
 
   chatWindow.once('ready-to-show', () => {
     if (chatWindow.isDestroyed()) return

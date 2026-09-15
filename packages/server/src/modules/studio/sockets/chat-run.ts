@@ -782,6 +782,9 @@ export class ChatRunSocket {
       allow_command_passthrough?: boolean
       // Local patch (reasoning-effort): per-session reasoning effort override.
       reasoning_effort?: string
+      // Local patch (user-controlled queue): true = 用户主动放行(打断当前、
+      // 插队到队首立即执行);缺省/false = 普通发送,仅入队尾排队等待。
+      preempt?: boolean
       push_enabled?: boolean
     }) => {
       let runProfile: string
@@ -842,8 +845,10 @@ export class ChatRunSocket {
           }
         }
         if (state.isWorking) {
+          logger.info('[chat-run-socket][preempt] new run during active session %s (isWorking=%s isAborting=%s runId=%s qlen=%d)',
+            data.session_id, state.isWorking, state.isAborting, state.runId, state.queue.length)
           const queueId = data.queue_id || `queue_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
-          state.queue.push({
+          const queuedRun: QueuedRun = {
             queue_id: queueId,
             input: data.input,
             displayInput: data.display_input,
@@ -876,7 +881,48 @@ export class ChatRunSocket {
             commandPassthrough: data.allow_command_passthrough,
             reasoningEffort: data.reasoning_effort,
             originSocketId: socket.id,
-          })
+          }
+          // [user-controlled patch] 两种行为:
+          //  - data.preempt === true(用户通过"立即发送"按钮 / ESC 显式放行):
+          //    插队到队首并打断当前 run,让该消息立即开始回复。
+          //  - 缺省(普通发送):只 push 到队尾排队等待,不打断当前生成,
+          //    当前 run 完成后的 dequeueNextQueuedRun 会按序自动拾取。
+          if (data.preempt === true) {
+            state.queue.unshift(queuedRun)
+            if (state.isAborting) {
+              const queuedPayload = {
+                event: 'run.queued',
+                session_id: data.session_id,
+                queue_id: queueId,
+                queue_length: state.queue.length,
+                queued_messages: this.serializeQueuedMessages(state.queue),
+              }
+              this.nsp.to(`session:${data.session_id}`).emit('run.queued', queuedPayload)
+              observeChatRunWebhookEvent({
+                event: 'run.queued',
+                sessionId: data.session_id,
+                profile: runProfile,
+                source,
+                agent: webhookAgentForRun(data),
+                payload: queuedPayload,
+                roomId: data.group_room_id,
+                workflowId: data.workflow_id,
+                workflowNodeId: data.workflow_node_id,
+              })
+              logger.info('[chat-run-socket] preempt queued run while already aborting for session %s (queue: %d)', data.session_id, state.queue.length)
+              return
+            }
+            logger.info('[chat-run-socket] preempting running session %s with new run (queue: %d)', data.session_id, state.queue.length)
+            await handleAbort(this.nsp, socket, data.session_id, this.sessionMap, this.bridge, this.runQueuedItem.bind(this))
+            // 兜底:handleAbort 若因"无活动 run"被忽略,手动出队队首(新消息)
+            const preempted = this.sessionMap.get(data.session_id)
+            if (preempted && !preempted.isWorking && preempted.queue.length > 0) {
+              this.dequeueNextQueuedRun(socket, data.session_id, runProfile)
+            }
+            return
+          }
+          // 默认:排队等待,不打断当前回复
+          state.queue.push(queuedRun)
           const queuedPayload = {
             event: 'run.queued',
             session_id: data.session_id,
@@ -896,7 +942,7 @@ export class ChatRunSocket {
             workflowNodeId: data.workflow_node_id,
           })
           this.nsp.to(`session:${data.session_id}`).emit('run.queued', queuedPayload)
-          logger.info('[chat-run-socket] queued run for session %s (queue: %d)', data.session_id, state.queue.length)
+          logger.info('[chat-run-socket] queued run %s for busy session %s (queue: %d, preempt=off)', queueId, data.session_id, state.queue.length)
           return
         }
         state.events = []
@@ -977,6 +1023,96 @@ export class ChatRunSocket {
       })
       logger.info('[chat-run-socket] cancelled queued run %s for session %s (queue: %d)',
         data.queue_id, data.session_id, state.queue.length)
+    })
+
+    // [user-controlled patch] 立即发送:把指定排队消息提升到队首并打断当前 run,
+    // 使其马上开始回复(markAbortCompleted 出队队首即该消息)。前端"立即发送"
+    // 按钮与 ESC 放行都走这个事件。
+    socket.on('run.promote', async (data: { session_id?: string; queue_id?: string }) => {
+          if (!data.session_id || !data.queue_id) return
+          let state = this.sessionMap.get(data.session_id)
+          if (!state || !state.queue.length) return
+          // [user-controlled patch] 连续 promote 并发保护:
+          // 用户快速连按 Ctrl+Enter 时,上一次 promote 的 handleAbort 可能还在进行
+          // (isAborting=true)。若此时直接发起第二次 handleAbort,两个 abort 并发,
+          // markAbortCompleted 的 abortFinalized 幂等标志会让第二次出队逻辑被跳过,
+          // 队列里的消息永远不再出队(表现为"系统停下")。
+          // 这里的做法:等上一次 abort 完全结束(最多 6 秒)再处理本条 promote。
+          if (state.isAborting) {
+            logger.info('[chat-run-socket] promote %s waiting for in-flight abort of session %s', data.queue_id, data.session_id)
+            const waitDeadline = Date.now() + 6000
+            while (state.isAborting && Date.now() < waitDeadline) {
+              await new Promise(resolve => setTimeout(resolve, 50))
+              state = this.sessionMap.get(data.session_id)
+              if (!state || !state.queue.length) return
+            }
+            logger.info('[chat-run-socket] promote %s proceeding after abort wait for session %s', data.queue_id, data.session_id)
+          }
+          const targetIndex = state.queue.findIndex(item => item.queue_id === data.queue_id)
+          if (targetIndex === -1) {
+            logger.info('[chat-run-socket] promote miss %s for session %s (queue: %d)', data.queue_id, data.session_id, state.queue.length)
+            // [user-controlled patch] promote miss 时也回传权威队列,让前端乐观移除
+            // 能与服务端最终一致(前端已本地移除,若服务端队列里没有该消息则无需恢复,
+            // 若存在则靠 replace 恢复显示)。
+            this.nsp.to(`session:${data.session_id}`).emit('run.queued', {
+              event: 'run.queued',
+              session_id: data.session_id,
+              queue_length: state.queue.length,
+              queued_messages: this.serializeQueuedMessages(state.queue),
+            })
+            return
+          }
+          const [target] = state.queue.splice(targetIndex, 1)
+          state.queue.unshift(target)
+          logger.info('[chat-run-socket] promote %s to head for session %s (queue: %d)', data.queue_id, data.session_id, state.queue.length)
+          await handleAbort(this.nsp, socket, data.session_id, this.sessionMap, this.bridge, this.runQueuedItem.bind(this))
+          const after = this.sessionMap.get(data.session_id)
+          if (after && !after.isWorking && after.queue.length > 0) {
+            this.dequeueNextQueuedRun(socket, data.session_id, target.profile || 'default')
+          }
+        })
+
+    socket.on('run.promote_all', async (data: { session_id?: string }) => {
+      if (!data.session_id) return
+      let state = this.sessionMap.get(data.session_id)
+      if (!state || !state.queue.length) return
+      // [user-controlled patch] 合并放行:用户一次 Ctrl+Enter 把队列里所有消息
+      // 合并成一条综合指令,让模型看到全部上下文后统一理解、综合处理,
+      // 避免逐条 promote 时后一条打断前一条导致前面的任务被遗忘。
+      if (state.isAborting) {
+        logger.info('[chat-run-socket] promote_all waiting for in-flight abort of session %s', data.session_id)
+        const waitDeadline = Date.now() + 6000
+        while (state.isAborting && Date.now() < waitDeadline) {
+          await new Promise(resolve => setTimeout(resolve, 50))
+          state = this.sessionMap.get(data.session_id)
+          if (!state || !state.queue.length) return
+        }
+        logger.info('[chat-run-socket] promote_all proceeding after abort wait for session %s', data.session_id)
+      }
+      const pending = state.queue.slice()
+            state.queue = []
+            const mergedInput = pending
+              .map((item, index) => {
+                const text = typeof item.input === 'string'
+                  ? item.input
+                  : JSON.stringify(item.input)
+                return `${index + 1}. ${text}`
+              })
+              .join('\n')
+            const combined = `用户按顺序发出了以下 ${pending.length} 条请求（按时间先后排列）：\n\n${mergedInput}\n\n请按以下规则综合判断后处理：\n\n1. 【修正/覆盖检测】后发的消息可能是在修改前面的消息（例如"改成2000字"是在修正前一条"写5000字"）。识别这种修正关系时，以【最后一条】表达的意图为准，不要重复执行被覆盖的任务。\n2. 【相关合并】互相关联的请求（例如"查天气"和"顺便看下雨"）合并思路统一处理。\n3. 【独立任务】互不相关的请求分别独立处理。\n4. 【完整性】不要遗漏任何一条消息表达过的重要意图，除非它被后续消息明确覆盖。\n5. 处理完后逐条给出结果，并说明哪些请求被合并/覆盖了。`
+            const first = pending[0]
+            const merged: QueuedRun = {
+              ...first,
+              queue_id: `merge_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+              input: combined,
+            }
+      state.queue.unshift(merged)
+      logger.info('[chat-run-socket] promote_all merged %d queued runs for session %s', pending.length, data.session_id)
+      await handleAbort(this.nsp, socket, data.session_id, this.sessionMap, this.bridge, this.runQueuedItem.bind(this))
+      const after = this.sessionMap.get(data.session_id)
+      if (after && !after.isWorking && after.queue.length > 0) {
+        this.dequeueNextQueuedRun(socket, data.session_id, first.profile || 'default')
+      }
     })
 
     socket.on('resume', async (data: { session_id?: string }) => {

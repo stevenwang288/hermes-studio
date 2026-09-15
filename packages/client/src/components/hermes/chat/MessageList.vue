@@ -282,6 +282,7 @@ const queuedMessages = computed(() => {
   if (!sid) return [];
   return chatStore.queuedUserMessages.get(sid) || [];
 });
+// [upstream] coding agent queue insertion float items — reads the same queuedUserMessages store.
 const queuedFloatItems = computed(() => queuedMessages.value.map(message => ({
   id: message.id,
   text: queuedPreview(message.content),
@@ -291,6 +292,9 @@ const activeQueueInsertion = computed(() => {
   if (!sid) return null;
   return chatStore.queueInsertionStates.get(sid) || null;
 });
+// [user-controlled patch] canInsertQueuedMessages 已移除（原先注释掉）——上游 #2477 的
+// "安全排队插入"按钮被隐藏（v-if="false"），避免与本 fork 的 ↑ 立即发送图标重复。
+// 但上游的 MessageQueueFloatPanel 是独立的 coding agent 队列浮窗，跟我们的消息队列不冲突，所以保留 canInsertQueuedMessages 供 MessageQueueFloatPanel 使用。
 const canInsertQueuedMessages = computed(() => {
   const session = chatStore.activeSession;
   if (!session) return false;
@@ -381,6 +385,12 @@ function removeQueuedMessage(messageId: string) {
   const sid = chatStore.activeSessionId;
   if (!sid) return;
   chatStore.removeQueuedMessage(sid, messageId);
+}
+
+function promoteQueuedMessage(messageId: string) {
+  const sid = chatStore.activeSessionId;
+  if (!sid) return;
+  chatStore.promoteQueuedMessage(sid, messageId);
 }
 
 function insertQueuedMessage(messageId: string) {
@@ -547,6 +557,16 @@ watch(
   () => chatStore.isRunActive,
   (v) => {
     if (v) scrollToBottom({ frames: 3, keepAliveMs: 400 });
+  },
+);
+
+// [user-controlled patch] 排队消息被 Ctrl+Enter/立即发送放行时,
+// store 乐观把消息放入会话区并递增 scrollToBottomCounter,
+// 这里监听它立即滚动到底部,让放行的消息马上进入视野。
+watch(
+  () => chatStore.scrollToBottomCounter,
+  (v) => {
+    if (v > 0) scrollToBottom({ frames: 3, keepAliveMs: 400 });
   },
 );
 
@@ -1014,11 +1034,11 @@ defineExpose({
           </div>
           <div class="clarify-float-input-row">
             <NInput
-              v-model:value="clarifyResponse"
-              size="small"
-              :type="visibleClarify.responseMode === 'editor' ? 'textarea' : 'text'"
-              :placeholder="t('chat.clarifyPlaceholder')"
-            />
+                          v-model:value="clarifyResponse"
+                          size="small"
+                          :type="visibleClarify.responseMode === 'editor' ? 'textarea' : 'text'"
+                          :placeholder="t('chat.clarifyPlaceholder')"
+                        />
             <NButton size="small" type="primary" @click="handleClarify()">
               {{ t("chat.clarifySubmit") }}
             </NButton>
@@ -1026,16 +1046,77 @@ defineExpose({
         </div>
       </Transition>
       <Transition name="queue-float">
-        <MessageQueueFloatPanel
-          :items="queuedFloatItems"
-          :can-insert="canInsertQueuedMessages"
-          :active-insert-id="activeQueueInsertion?.queueId"
-          :insert-title="item => queueInsertionTitle(item.id)"
-          @insert="insertQueuedMessage"
-          @remove="removeQueuedMessage"
-        />
+        <div v-if="queuedMessages.length > 0" class="queue-float-panel">
+          <div class="queue-float-header">
+            <span class="queue-orbit" aria-hidden="true">
+              <span></span>
+            </span>
+            <span>{{ t('chat.messageQueue') }}</span>
+            <strong>{{ queuedMessages.length }}</strong>
+          </div>
+          <div class="queue-float-list">
+            <div
+              v-for="(message, index) in queuedMessages"
+              :key="message.id"
+              class="queue-float-item"
+            >
+              <span class="queue-index">{{ index + 1 }}</span>
+              <span class="queue-text">{{ queuedPreview(message.content) }}</span>
+              <!-- [user-controlled patch] 上游 #2477 的"安全排队插入"按钮图标与
+                                 本 fork 的"立即发送"(promote) 撞车(都是上箭头):隐藏上游按钮,
+                                 只保留本 fork 的 ↑ 立即发送(ESC/Ctrl+Enter 同语义)。删除时直接
+                                 删掉整个 <button class="queue-insert"> 块。 -->
+                            <button
+                              v-if="false"
+                              type="button"
+                              class="queue-insert"
+                              :class="{ 'queue-insert--active': activeQueueInsertion?.queueId === message.id }"
+                              :disabled="!!activeQueueInsertion"
+                              :title="queueInsertionTitle(message.id)"
+                              :aria-label="queueInsertionTitle(message.id)"
+                              @click="insertQueuedMessage(message.id)"
+                            >
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 19V5" />
+                                <path d="m5 12 7-7 7 7" />
+                              </svg>
+                            </button>
+              <button
+                type="button"
+                class="queue-promote"
+                @click="promoteQueuedMessage(message.id)"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                  <line x1="12" y1="19" x2="12" y2="6" />
+                  <polyline points="5 11 12 4 19 11" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="queue-remove"
+                :title="t('chat.removeQueuedMessage')"
+                @click="removeQueuedMessage(message.id)"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
       </Transition>
     </div>
+    <Transition name="queue-float">
+      <MessageQueueFloatPanel
+        :items="queuedFloatItems"
+        :can-insert="canInsertQueuedMessages"
+        :active-insert-id="activeQueueInsertion?.queueId"
+        :insert-title="item => queueInsertionTitle(item.id)"
+        @insert="insertQueuedMessage"
+        @remove="removeQueuedMessage"
+      />
+    </Transition>
   </div>
 </template>
 
@@ -1351,6 +1432,26 @@ defineExpose({
   }
 }
 
+.queue-promote {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: $text-muted;
+  background: transparent;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    color: $success;
+    background: rgba($success, 0.1);
+  }
+}
+
 @media (max-width: 640px) {
   .message-float-stack {
     left: 8px;
@@ -1417,6 +1518,11 @@ defineExpose({
 
   .queue-insert,
   .queue-remove {
+    width: 22px;
+    height: 22px;
+  }
+
+  .queue-promote {
     width: 22px;
     height: 22px;
   }

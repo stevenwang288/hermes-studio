@@ -1409,12 +1409,23 @@ export const useChatStore = defineStore('chat', () => {
     else clearRunStartedAt(sessionId)
   }
   const queueLengths = ref<Map<string, number>>(new Map())
-  /** sessionId → queued user messages not yet visible in the transcript */
-  const queuedUserMessages = ref<Map<string, Message[]>>(new Map())
-  /** sessionId → server-owned safe-boundary insertion state */
-  const queueInsertionStates = ref<Map<string, QueueInsertionState>>(new Map())
-  /** sessionId → queue ids that server reported as dequeued before the peer message arrived */
-  const dequeuedQueueIds = ref<Map<string, Set<string>>>(new Map())
+    /** sessionId → queued user messages not yet visible in the transcript */
+    const queuedUserMessages = ref<Map<string, Message[]>>(new Map())
+    /** sessionId → server-owned safe-boundary insertion state */
+    const queueInsertionStates = ref<Map<string, QueueInsertionState>>(new Map())
+    /** sessionId → queue ids that server reported as dequeued before the peer message arrived */
+    const dequeuedQueueIds = ref<Map<string, Set<string>>>(new Map())
+    /**
+     * [user-controlled patch] 滚动信号:promoteQueuedMessage 乐观把排队消息
+     * 立即放入会话区时递增,MessageList 监听它执行 scrollToBottom,
+     * 让放行的消息立刻出现在视野里,不用等服务端 run.queued 来回网络。
+     */
+    const scrollToBottomCounter = ref(0)
+
+  // [user-controlled patch] promote/立即发送时被乐观移除的排队消息快照:
+  // 服务端确认出队(dequeued_queue_id 回传)后,若本地队列已无该条(乐观移除),
+  // 用快照把它恢复显示到主消息列表,避免"AI 已收到但聊天窗口看不见消息"。
+  const promotedMessageSnapshots = ref<Map<string, Map<string, Message>>>(new Map())
   /** sessionId → message selected as the reference for the next user turn */
   const messageReferences = ref<Map<string, MessageReference>>(new Map())
   const activeMessageReference = computed(() => {
@@ -3061,6 +3072,61 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
+function promoteQueuedMessage(sessionId: string, messageId: string) {
+    const target = (queuedUserMessages.value.get(sessionId) || []).find(message => message.id === messageId)
+    if (!target) return
+    // [user-controlled patch] 立即发送:先在本地乐观移除该条排队消息(UI 立即反馈,
+    // 不用等服务端 interrupt 同步完成后才清队列),再 emit run.promote。
+    // 服务端 promote 成功后会在出队/打断完成时 emit run.queued(dequeued_queue_id)
+    // 权威队列,前端收到后 replace 保持最终一致;若 promote miss,服务端会回
+    // 权威队列,前端 replace 恢复显示,不会丢消息。
+    dropQueuedUserMessage(sessionId, messageId)
+    markDequeuedQueueId(sessionId, messageId)
+    // [user-controlled patch] 乐观把消息立即显示到会话区,不等服务端 run.queued
+    // 回调,消除 Ctrl+Enter 放行后\"队列空了但消息还没出现\"的迟钝感。
+    // 服务端后续 handleRunQueuedEvent 已有去重检查,不会重复添加。
+    if (!getSessionMsgs(sessionId).some(msg => msg.id === messageId)) {
+      addMessage(sessionId, { ...target, queued: false })
+      updateSessionTitle(sessionId)
+    }
+    scrollToBottomCounter.value++
+        // [user-controlled patch] 乐观设置"AI正在工作"状态,让前端立即显示
+        // 正在处理的指示器,不等服务端 run.started 事件(服务端可能因 bridge 延迟
+        // 或模型卡住而不发出事件,导致前端全程无反馈,感觉"完全静止")。
+        serverWorking.value.add(sessionId)
+        const snap = new Map(promotedMessageSnapshots.value)
+    const per = snap.get(sessionId) || new Map()
+    per.set(messageId, { ...target, queued: false })
+    snap.set(sessionId, per)
+    promotedMessageSnapshots.value = snap
+    getChatRunSocket(runtimeTransport())?.emit('run.promote', {
+          session_id: sessionId,
+          queue_id: messageId,
+        })
+      }
+
+      // [user-controlled patch] 合并放行:一次 Ctrl+Enter 把队列里所有消息合并成
+      // 一条综合指令发给模型,让模型看到全部上下文后统一理解、综合处理,
+      // 避免逐条 promote 时后一条打断前一条导致前面的任务被遗忘。
+      function promoteAllQueuedMessages(sessionId: string) {
+        const all = queuedUserMessages.value.get(sessionId) || []
+        if (!all.length) return
+        // 乐观把全部排队消息立即显示到会话区 + 清空队列
+        all.forEach((message) => {
+          if (!getSessionMsgs(sessionId).some(msg => msg.id === message.id)) {
+            addMessage(sessionId, { ...message, queued: false })
+          }
+          dropQueuedUserMessage(sessionId, message.id)
+          markDequeuedQueueId(sessionId, message.id)
+        })
+        updateSessionTitle(sessionId)
+        scrollToBottomCounter.value++
+        serverWorking.value.add(sessionId)
+        getChatRunSocket(runtimeTransport())?.emit('run.promote_all', {
+          session_id: sessionId,
+        })
+      }
+
   function insertQueuedMessage(sessionId: string, messageId: string) {
     if (!(queuedUserMessages.value.get(sessionId) || []).some(message => message.id === messageId)) return
     getChatRunSocket(runtimeTransport())?.emit('insert_queued_run', {
@@ -3103,7 +3169,6 @@ export const useChatStore = defineStore('chat', () => {
     if (!sid) return
     replaceQueueInsertionState(sid, evt)
   }
-
   function normalizeQueuedUserMessages(rawMessages: unknown): Message[] {
     if (!Array.isArray(rawMessages)) return []
     return rawMessages.flatMap((raw) => {
@@ -3185,19 +3250,44 @@ export const useChatStore = defineStore('chat', () => {
         replaceQueuedUserMessages(sessionId, nextQueue)
       }
       if (dequeued && !getSessionMsgs(sessionId).some(message => message.id === dequeued.id)) {
-        addMessage(sessionId, { ...dequeued, queued: false })
-        updateSessionTitle(sessionId)
-      } else if (!dequeued) {
-        markDequeuedQueueId(sessionId, dequeuedId)
-      }
+              addMessage(sessionId, { ...dequeued, queued: false })
+              updateSessionTitle(sessionId)
+            } else if (!dequeued) {
+              // 服务端已将该消息出队(dequeued_queue_id 是权威),即使本地队列里找不到
+              // 匹配项(如 ID 被服务端改写/事件乱序),也必须把它从 UI 队列移除,
+              // 否则队列面板会一直挂着"已发出"的消息。同时打标记防止后续
+              // run.started 把它当新排队消息再加回来。
+              dropQueuedUserMessage(sessionId, dequeuedId)
+              markDequeuedQueueId(sessionId, dequeuedId)
+              // [user-controlled patch] promote 乐观移除导致本地队列找不到该条时,
+              // 用 promote 时保存的快照把这条"已发出的消息"恢复显示到主列表,否则
+              // AI 已接收执行但聊天窗口看不见该条消息。快照消费后清除,避免占内存。
+              const restored = (promotedMessageSnapshots.value.get(sessionId) || new Map()).get(dequeuedId)
+              if (restored && !getSessionMsgs(sessionId).some(message => message.id === dequeuedId)) {
+                addMessage(sessionId, { ...restored, queued: false })
+                updateSessionTitle(sessionId)
+              }
+              const sv = promotedMessageSnapshots.value
+              if (sv.has(sessionId)) {
+                const per = new Map(sv.get(sessionId) || new Map())
+                per.delete(dequeuedId)
+                const nv = new Map(sv)
+                if (per.size > 0) nv.set(sessionId, per)
+                else nv.delete(sessionId)
+                promotedMessageSnapshots.value = nv
+              }
+            }
       return
     }
 
     if (Array.isArray((evt as any).queued_messages)) {
-      const queued = normalizeQueuedUserMessages((evt as any).queued_messages)
-      replaceQueuedUserMessages(sessionId, queued)
-      return
-    }
+          const queued = normalizeQueuedUserMessages((evt as any).queued_messages)
+          // [user-controlled patch] 过滤掉已经在会话区中的消息,避免服务端权威队列
+          // 把已放行的消息又加回队列面板(消息队列残留 bug)。
+          const filtered = queued.filter(msg => !getSessionMsgs(sessionId).some(m => m.id === msg.id))
+          replaceQueuedUserMessages(sessionId, filtered)
+          return
+        }
 
     const peer = evt.message
     const content = typeof peer?.content === 'string' ? peer.content : ''
@@ -3713,6 +3803,9 @@ export const useChatStore = defineStore('chat', () => {
           models: group.models,
         })),
         queue_id: userMsg.id,
+        // 普通发送默认排队不打断;只有用户通过"立即发送"/ESC 显式放行时
+        // (promoteQueuedMessage 走 run.promote)才打断当前回复。
+        preempt: false,
         workspace: activeSession.value?.workspace || undefined,
         category_id: activeSession.value?.categoryId ?? null,
         source: sessionSource,
@@ -5497,7 +5590,8 @@ export const useChatStore = defineStore('chat', () => {
     isAborting,
     queueLengths,
     queuedUserMessages,
-    queueInsertionStates,
+        queueInsertionStates,
+        scrollToBottomCounter,
     activeMessageReference,
     pendingApprovals,
     activePendingApproval,
@@ -5506,7 +5600,9 @@ export const useChatStore = defineStore('chat', () => {
     subagentStreams,
     getSubagentStream,
     removeQueuedMessage,
-    insertQueuedMessage,
+        promoteQueuedMessage,
+        promoteAllQueuedMessages,
+        insertQueuedMessage,
     setMessageReference,
     clearMessageReference,
     isLoadingSessions,

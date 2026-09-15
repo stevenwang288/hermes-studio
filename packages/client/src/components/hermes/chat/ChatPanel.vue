@@ -3253,10 +3253,7 @@ async function handleSessionModelCustomSubmit() {
               <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
             </svg>
             <span>
-              {{
-                chatStore.activeSession.workspace.split("/").pop() ||
-                chatStore.activeSession.workspace
-              }}
+              {{ chatStore.activeSession.workspace }}
             </span>
           </button>
         </div>
@@ -4311,7 +4308,7 @@ async function handleSessionModelCustomSubmit() {
   background: rgba(255, 255, 255, 0.05);
   padding: 2px 8px;
   border-radius: 4px;
-  max-width: 160px;
+  max-width: min(520px, 55vw);
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -4327,6 +4324,7 @@ async function handleSessionModelCustomSubmit() {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
   }
 
   &:hover {
