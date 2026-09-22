@@ -279,9 +279,13 @@ token 来源：环境变量 `GITHUB_TOKEN`（`ghp_` 开头，40 字符）。
 
 ### 文件名
 
-`Hermes.Studio-<version>-x64.exe`
+| 版本段 | 产物名 |
+|--------|--------|
+| ≤ 0.7.22 | `Hermes.Studio-<version>-x64.exe` |
+| **≥ 0.7.23** | **`Ekko.Studio-<version>-x64.exe`** |
 
-（exe 用 `Hermes.Studio-` 前缀，但产品名/任务栏显示 `Ekko Studio`——官方改名后保留了旧前缀，与官方一致，**不是改错**）
+> 上游在 **0.7.23 把安装包命名从 `Hermes.Studio-` 改成了 `Ekko.Studio-`**。
+> 产品名/任务栏一直是 `Ekko Studio`。**以实际构建输出为准**，别想当然套旧名字。
 
 ### 怎么出
 
