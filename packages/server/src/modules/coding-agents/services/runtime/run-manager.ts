@@ -33,6 +33,7 @@ import { isolatedCodingAgentChildEnv } from './child-env'
 import { NativeTurnUsage, type NativeUsageRow } from './native-usage'
 import { readCodexTurnModel, readOpenCodeMessageModel } from './native-model'
 import { getCodingAgentGlobalHome } from '../../../studio/public/coding-agent-global-home'
+import { isContextWindowExceededError, nativeContextRecoveryMessage, resetNativeSessionAfterContextOverflow } from '../context-recovery'
 
 export { isolatedCodingAgentChildEnv } from './child-env'
 
@@ -199,6 +200,7 @@ export interface ManagedCodingAgentRun {
   pendingChatCompletionEvent?: 'run.completed' | 'run.failed'
   pendingChatCompletionPayload?: Record<string, unknown>
   memoryExportStarted?: boolean
+  nativeCompactCommandActive?: boolean
   assistantMessageId?: string
   piDetachJsonl?: () => void
   piToolBlocks?: Map<string, { id: string; name: string; arguments: string; done: boolean }>
@@ -351,7 +353,7 @@ function hasManagedHermesMcpConfig(run: ManagedCodingAgentRun): boolean {
     if (!piHome) return false
     try {
       const config = readFileSync(join(piHome, 'mcp.json'), 'utf-8')
-      return config.includes('"ekko-studio-api"') && config.includes('"ekko-studio-use"') && config.includes('"ekko-studio-plan"')
+      return config.includes('"ekko-studio-api"') && config.includes('"ekko-studio-use"') && config.includes('"ekko-studio-interaction"')
     } catch {
       return false
     }
@@ -361,7 +363,7 @@ function hasManagedHermesMcpConfig(run: ManagedCodingAgentRun): boolean {
     if (!grokHome) return false
     try {
       const config = readFileSync(join(grokHome, 'config.toml'), 'utf-8')
-      return config.includes('[mcp_servers.ekko-studio-api]') && config.includes('[mcp_servers.ekko-studio-use]') && config.includes('[mcp_servers.ekko-studio-plan]')
+      return config.includes('[mcp_servers.ekko-studio-api]') && config.includes('[mcp_servers.ekko-studio-use]') && config.includes('[mcp_servers.ekko-studio-interaction]')
     } catch {
       return false
     }
@@ -371,7 +373,7 @@ function hasManagedHermesMcpConfig(run: ManagedCodingAgentRun): boolean {
     if (!configDir) return false
     try {
       const config = readFileSync(join(configDir, 'opencode.json'), 'utf-8')
-      return config.includes('"ekko-studio-api"') && config.includes('"ekko-studio-use"') && config.includes('"ekko-studio-plan"')
+      return config.includes('"ekko-studio-api"') && config.includes('"ekko-studio-use"') && config.includes('"ekko-studio-interaction"')
     } catch {
       return false
     }
@@ -381,7 +383,7 @@ function hasManagedHermesMcpConfig(run: ManagedCodingAgentRun): boolean {
   if (!codexHome) return false
   try {
     const config = readFileSync(join(codexHome, 'config.toml'), 'utf-8')
-    return ['api', 'browser', 'devices', 'use', 'plan'].every(toolset => config.includes(`[mcp_servers.ekko-studio-${toolset}]`))
+    return ['api', 'browser', 'devices', 'use', 'interaction'].every(toolset => config.includes(`[mcp_servers.ekko-studio-${toolset}]`))
   } catch {
     return false
   }
@@ -914,6 +916,7 @@ export class CodingAgentRunManager {
     const nativeSessionId = String(run.launch.agentNativeSessionId || '').trim()
     if (run.launch.agentId === 'claude-code') {
       if (!nativeSessionId) throw new Error('Claude Code session has no native session to compact')
+      run.nativeCompactCommandActive = true
       this.startClaudePrintTurn(run, `/compact${args ? ` ${args}` : ''}`, '', [])
       return { started: true }
     }
@@ -933,6 +936,7 @@ export class CodingAgentRunManager {
     }
     if (run.launch.agentId === 'grok') {
       if (!nativeSessionId) throw new Error('Grok session has no native session to compact')
+      run.nativeCompactCommandActive = true
       this.startGrokPrintTurn(run, `/compact${args ? ` ${args}` : ''}`, '', [])
       return { started: true }
     }
@@ -2325,8 +2329,32 @@ export class CodingAgentRunManager {
     })
   }
 
+  private recoverFailedNativeCompact(run: ManagedCodingAgentRun, error: unknown) {
+    if (!run.nativeCompactCommandActive) return
+    run.nativeCompactCommandActive = false
+    if (!isContextWindowExceededError(error)) return
+    const recovery = resetNativeSessionAfterContextOverflow(run.launch.sessionId, run.launch.agentId)
+    if (!recovery.reset) return
+    run.launch.agentNativeSessionId = ''
+    run.nativeResumeReady = false
+    run.disposeAfterTurn = true
+    const agentName = run.launch.agentId === 'grok' ? 'Grok' : 'Claude Code'
+    this.emitToChat(run.launch.sessionId, 'session.command', {
+      event: 'session.command',
+      session_id: run.launch.sessionId,
+      command: 'compact',
+      action: 'compact',
+      ok: true,
+      terminal: true,
+      compacted: false,
+      resetNativeThread: true,
+      message: nativeContextRecoveryMessage(agentName),
+    })
+  }
+
   private failClaudePrintTurn(run: ManagedCodingAgentRun, errorText: string) {
     if (run.printCompleted) return
+    this.recoverFailedNativeCompact(run, errorText)
     run.printCompleted = true
     const existingText = run.printText || ''
     const appendedError = appendedTextDelta(existingText, errorText)
@@ -2371,6 +2399,7 @@ export class CodingAgentRunManager {
 
   private completeClaudePrintTurn(run: ManagedCodingAgentRun, usage?: any) {
     if (run.printCompleted) return
+    run.nativeCompactCommandActive = false
     run.printCompleted = true
     const text = run.printText || ''
     const output = run.printTextStarted

@@ -122,6 +122,7 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/workspace-di
 vi.mock('../../packages/server/src/modules/studio/public/profile-config', () => ({
   getProfileDir: (profile: string) => `/tmp/hermes-bridge-final-context/${profile || 'default'}`,
   saveEnvValueForProfile: saveEnvValueForProfileMock,
+  readConfigYamlForProfile: vi.fn(async () => ({})),
 }))
 
 vi.mock('../../packages/server/src/modules/studio/public/auth', () => ({
@@ -459,7 +460,7 @@ describe('bridge run final context usage', () => {
         expect(cachedSystem).not.toMatch(/context_id="/)
         const context = String(message).match(/context_id="([^"]+)"/)![1]
         expect(context).toBe(contexts.at(-1))
-        expect(message).toContain('ekko-studio-plan')
+        expect(message).toContain('ekko-studio-interaction')
         expect(options.storage_message).toBe('Show the task card')
         const result = await call(context)
         expect(result.isError).not.toBe(true)
