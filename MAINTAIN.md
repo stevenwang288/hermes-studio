@@ -18,9 +18,10 @@
 
 ## 1. 一句话概括要做的事
 
-> **上游更新了 → 合进来 → 本地验证 → 推 GitHub → 更新 4 台 PVE → 出 Windows 安装程序**
+> **上游更新了 → 合进来 → 本地验证 → 推 GitHub → 更新 4 台 PVE → 浏览器验收 4 台 → 出 Windows 安装程序并装到本机**
 
 用户不需要每次交代，看到上游有新版本就按本文执行。
+**这条链是「一条龙」，缺任何一环都不算完成。**
 
 ---
 
@@ -73,13 +74,38 @@ git push origin sync
 
 **GitHub 操作规范见第 5 节——不要用交互式凭据。**
 
+**若 GitHub 不通**（代理节点问题，症状见第 5 节）：**不要卡在这里硬等**。走内网直传，4 台 PVE 照样能拿到代码：
+
+```bash
+# 本地打增量 bundle（基点是远端当前已有的 commit）
+git bundle create .sync-upload.bundle <远端现有commit>..sync
+# 分发到 4 台
+for vm in 931 935 936 961; do scp .sync-upload.bundle pve-vm-$vm:/tmp/; done
+# 每台上合并
+ssh pve-vm-935 'cd /opt/hermes-studio && git fetch /tmp/sync-upload.bundle sync:incoming && git merge incoming --no-edit'
+```
+
+用完删掉本地 `.sync-upload.bundle`（不该进版本库）。
+
+> 2026-09-22 实战：本地与 4 台对 GitHub 均不通（`TLS unexpected eof` / `GnuTLS handshake failed`），
+> 全程用 bundle 直传完成升级，4 台验收全通过。**这条路是可行的，别再因为推不上去而停摆。**
+
 ### 第 4 步 · 更新 4 台 PVE
 
 见第 4 节。**这是线上服务，重启会中断，动之前先跟用户确认。**
 
-### 第 5 步 · 出 Windows 安装程序
+### 第 5 步 · 浏览器验收 4 台（**升级是否真的可用的最终判据**）
 
-见第 6 节。产物放哪见第 6 节（**每次都要放到同一个地方，别再问**）。
+```bash
+node scripts/verify-fleet.mjs          # 全部 4 台
+node scripts/verify-fleet.mjs 935      # 单台
+```
+
+每台打开 Web UI，发一道随机加法题，**AI 答对才算通过**。详细步骤与三个坑见第 5 节。
+
+### 第 6 步 · 出 Windows 安装程序并装到本机
+
+见第 6 节。产物放哪、怎么装，都在那里（**别再问**）。
 
 ---
 
@@ -134,6 +160,62 @@ EOF
 **必须显式切 node 到 v24.20.0**：systemd 的 `ExecStart` 用的是 nvm 里 v24.20.0 的绝对路径，而 ssh 登录后默认 `node -v` 是 v22/v23。不切会导致产物与运行时不一致。
 
 936 额外要 `chown -R ubuntu:ubuntu`.
+
+---
+
+## 4.5 浏览器端功能验收（升级后必做）
+
+**判据：每台打开 Web UI，发一道加法题，AI 答对才算通过。**
+
+脚本：`scripts/verify-fleet.mjs`
+
+### 环境准备（本机一次性）
+
+**不要用 `agent-browser`** —— 它自带的 Chromium 没装，且 `--cdp` / `--auto-connect` 都不生效，只会反复尝试启动不存在的浏览器。
+改用**系统 Chrome + playwright-core**：
+
+```bash
+# 1) 装 playwright-core（只装库，不下载浏览器）
+mkdir -p /tmp/cdp-tool && cd /tmp/cdp-tool && npm init -y && npm install playwright-core
+```
+
+### 运行
+
+Chrome **必须与脚本在同一个命令内启动**，否则后台进程会被回收（报 `ECONNREFUSED 127.0.0.1:9222`）：
+
+```bash
+"/c/Program Files/Google/Chrome/Application/chrome.exe" \
+  --remote-debugging-port=9222 \
+  --user-data-dir="C:/Users/baba1/AppData/Local/Temp/chrome-cdp-profile" \
+  --no-first-run --no-default-browser-check --headless=new about:blank &
+sleep 8
+node scripts/verify-fleet.mjs          # 或加参数只跑一台：verify-fleet.mjs 935
+```
+
+- Web UI：`http://192.168.9.31|35|36|61:8648`
+- 默认登录：`admin / 123456`
+- 服务重启后**需约 14 秒**才绑定 8648，太早访问会误判失败
+
+### 三个必踩的坑（脚本里已处理，改动时别删）
+
+| # | 现象 | 处理 |
+|---|------|------|
+| 1 | 填入题目后按 Enter **不发送**，文字还留在输入框 | 必须点 `button.send-button` |
+| 2 | 点击被 `n-modal-mask` 拦截（`subtree intercepts pointer events`） | 首次登录会弹「请修改默认账户和密码」，先点 **「稍后提醒」** 关掉 |
+| 3 | 检测到答案其实来自历史消息，误判通过 | 只读**新增的** `div.message.assistant > div.msg-content`；发送前先记录 `before` 计数 |
+
+### 关键选择器
+
+```
+登录框     input.login-input        (第 0 个 = 用户名，第 1 个 = 密码)
+登录按钮   button:has-text("登录")
+安全弹窗   .n-modal-container button:has-text("稍后提醒")
+输入框     textarea.input-textarea
+发送按钮   button.send-button       (aria-label="Send")
+用户消息   div.message.user
+AI 回复    div.message.assistant > div.msg-content
+消息列表   div.virtual-message-list
+```
 
 ---
 
@@ -215,6 +297,29 @@ gh run download <RUN_ID> --repo stevenwang288/hermes-studio \
 
 下载后：**最新 exe 放到 `d:\desk\`**，同时保留一份到 `packages/desktop/release/`，
 并清理 `d:\desk` 下的旧版本安装程序（只留最新）。
+
+### 装到本机（**这一步也不能省**）
+
+用户的桌面版要跟着升到同一版本。安装程序是 NSIS，支持静默覆盖安装：
+
+```bash
+"d:/desk/Hermes.Studio-<version>-x64.exe" /S
+```
+
+安装位置：`C:\Users\baba1\AppData\Local\Programs\Hermes Studio\`
+
+安装后验证：
+
+```bash
+# 1) 版本号
+powershell -c "(Get-Item 'C:\Users\baba1\AppData\Local\Programs\Hermes Studio\Ekko Studio.exe').VersionInfo.ProductVersion"
+# 2) 进程在跑
+tasklist | grep -i "Ekko Studio"
+```
+
+> **云编译走不通时（GitHub 不通）的退路**：本地打包
+> `cd packages/desktop && npm run dist:win`
+> （需能拉到 electron 二进制；产物同样落在 `packages/desktop/release/`）
 
 ---
 
