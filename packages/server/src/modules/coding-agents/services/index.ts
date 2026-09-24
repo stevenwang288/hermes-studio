@@ -1,3 +1,5 @@
+import { readTomlAssignment } from './toml-assignment'
+import { studioMcpCapabilities } from '../../studio/public/runs/mcp-capabilities'
 import { prepareDshRuntime, DSH_API_KEY_ENV } from './dsh/runtime-config'
 import { readDshMcpServers, validateDshSettings } from './dsh/config'
 import { createDshHost } from './dsh/host'
@@ -21,7 +23,7 @@ import { hermesPromptDocument, writeManagedPromptFile } from './prompt-file'
 import type { ApiMode, CodingAgentImageInput } from '../protocol/types'
 import { PROVIDER_PRESETS } from '../../studio/contracts/providers'
 import { getModelContextLength, getModelRuntimeCapabilities } from '../../studio/public/provider-runtime'
-import { getSystemPrompt } from '../../studio/public/runs/prompt'
+import { getSystemPrompt, studioMcpUsageGuidelines } from '../../studio/public/runs/prompt'
 import { codingAgentRunManager } from './runtime/run-manager'
 import { mergePiSettings, userSettingsProvidesPiMcpAdapter } from './pi/settings'
 import { PI_EXTENDED_THINKING_LEVEL_MAP, piModelSupportsThinking } from './pi/thinking'
@@ -46,6 +48,7 @@ import type { CodingAgentRuntime } from '../../studio/contracts/agents/runtime'
 import { defaultCodingAgentWorkspace } from '../../studio/public/workspace-manager'
 import { isolateUnhealthyRuntimeMcpServers } from './mcp-runtime-isolation'
 import { getCodingAgentGlobalHome } from '../../studio/public/coding-agent-global-home'
+import { codingAgentContextPolicy, compactionPercent, claudeCompactionPercent, piCompactionSettings, type CodingAgentContextPolicy } from './context-policy'
 
 const execFileAsync = promisify(execFile)
 const LAUNCH_API_MODES = new Set<ApiMode>(['chat_completions', 'codex_responses', 'anthropic_messages'])
@@ -56,11 +59,13 @@ const NODE_ENVIRONMENT_MISSING_CODE = 'node_environment_missing'
 const POSIX_LAUNCHER_FILE = 'launch.sh'
 const WINDOWS_LAUNCHER_FILE = 'launch.ps1'
 const CLAUDE_CODE_SKIP_PERMISSIONS_ARGS = ['--dangerously-skip-permissions']
-const CLAUDE_CODE_ROOT_PERMISSION_ARGS = ['--permission-mode', 'auto']
-// Claude Code auto-compact is on by default, but Studio never tells it the
-// model context window, so it can compact too late for the 20MB proxy body
-// limit. Mirror Hermes' 50% compression budget and pass Studio's window.
-const CLAUDE_CODE_AUTO_COMPACT_PERCENT = 50
+const CLAUDE_CODE_TASK_PLAN_TOOL = 'mcp__ekko-studio-interaction__ekko_studio_update_plan'
+const CLAUDE_CODE_ROOT_PERMISSION_ARGS = [
+  '--permission-mode',
+  'auto',
+  '--allowedTools',
+  CLAUDE_CODE_TASK_PLAN_TOOL,
+]
 const PI_MCP_ADAPTER_PACKAGE = 'pi-mcp-adapter'
 const OFFICIAL_NPM_REGISTRY = 'https://registry.npmjs.org'
 const PI_PROVIDER_ID = 'hermes-studio'
@@ -93,10 +98,11 @@ const HERMES_MCP_SERVERS: ReadonlyArray<{ name: string; toolset: string }> = [
   { name: 'ekko-studio-browser', toolset: 'browser' },
   { name: 'ekko-studio-devices', toolset: 'devices' },
   { name: 'ekko-studio-use', toolset: 'use' },
-  { name: 'ekko-studio-plan', toolset: 'plan' },
+  { name: 'ekko-studio-interaction', toolset: 'plan' },
 ]
 const HERMES_MCP_SERVER_NAMES: Set<string> = new Set(HERMES_MCP_SERVERS.map(server => server.name))
 const LEGACY_HERMES_MCP_SERVER_NAMES = new Set([
+  'ekko-studio-plan',
   'hermes-studio-api',
   'hermes-studio-browser',
   'hermes-studio-devices',
@@ -1186,6 +1192,7 @@ function hermesMcpServerConfig(profile: string, serverName: string, toolset: str
       HERMES_WEB_UI_PROFILE: profile,
       HERMES_MCP_SERVER_NAME: serverName,
       HERMES_MCP_TOOLSET: toolset,
+      HERMES_MCP_USER_CLARIFICATION: '1',
       [HERMES_MCP_MANAGED_ENV_KEY]: '1',
     },
   }
@@ -1198,9 +1205,18 @@ function managedHermesMcpServerConfig(
   toolset: string,
 ): Record<string, unknown> {
   const override = getManagedMcpServerOverride(agentId, profile, serverName)
-  return Object.keys(override).length
+  const server: Record<string, unknown> = Object.keys(override).length
     ? override
     : hermesMcpServerConfig(profile, serverName, toolset)
+  if (toolset === 'plan') {
+    const env = server.env as Record<string, string> | undefined
+    if (env?.[HERMES_MCP_MANAGED_ENV_KEY] === '1') {
+      server.env = { ...env, HERMES_MCP_SERVER_NAME: serverName, HERMES_MCP_USER_CLARIFICATION: '1' }
+    }
+    if (agentId === 'claude-code' || agentId === 'opencode') server.timeout = Math.max(360_000, Number(server.timeout) || 0)
+    if (agentId === 'dsh') server.toolCallTimeoutMs = Math.max(360_000, Number(server.toolCallTimeoutMs) || 0)
+  }
+  return server
 }
 
 function isManagedHermesMcpServer(value: unknown): boolean {
@@ -1325,57 +1341,6 @@ function parseCodexExternalMcpBlocks(...contents: Array<string | null | undefine
   return Array.from(blockByServer.values()).filter(Boolean)
 }
 
-interface TomlArrayScanState {
-  quote: '"' | "'" | null
-  multiline: boolean
-}
-
-function scanTomlArrayBrackets(line: string, state: TomlArrayScanState): number {
-  let delta = 0
-  let escaped = false
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index]
-    if (state.quote) {
-      if (state.multiline) {
-        if (state.quote === '"' && char === '\\') {
-          escaped = !escaped
-          continue
-        }
-        if (char === state.quote && !escaped) {
-          let quoteCount = 1
-          while (line[index + quoteCount] === state.quote) quoteCount += 1
-          if (quoteCount >= 3) {
-            state.quote = null
-            state.multiline = false
-            index += quoteCount - 1
-          }
-        }
-        escaped = false
-        continue
-      }
-      if (state.quote === '"' && char === '\\' && !escaped) {
-        escaped = true
-        continue
-      }
-      if (char === state.quote && !escaped) {
-        state.quote = null
-      }
-      escaped = false
-      continue
-    }
-    if (char === '#') break
-    if (char === '"' || char === "'") {
-      state.quote = char
-      state.multiline = line.slice(index, index + 3) === char.repeat(3)
-      if (state.multiline) index += 2
-      continue
-    }
-    if (char === '[') delta += 1
-    else if (char === ']') delta -= 1
-  }
-  return delta
-}
-
 function isManagedCodexSection(section: string): boolean {
   return section === 'models'
     || section.startsWith('model.')
@@ -1393,12 +1358,20 @@ function codexRuntimeUserConfig(...contents: Array<string | null | undefined>): 
   featureLines: string[]
 } {
   const topLevel = new Map<string, string>()
-  const sections = new Map<string, { header: string; lines: string[] }>()
+  const sections = new Map<string, {
+    header: string
+    entries: string[][]
+    assignmentIndexes: Map<string, number>
+  }>()
   const featureLines = new Map<string, string>()
   const runtimeKeys = new Set([
     'model',
     'model_provider',
     'model_catalog_json',
+    'model_context_window',
+    'model_auto_compact_token_limit',
+    'model_auto_compact_token_limit_scope',
+    'model_auto_compact_enabled',
     'model_reasoning_summary',
     'model_reasoning_effort',
     'developer_instructions',
@@ -1408,72 +1381,69 @@ function codexRuntimeUserConfig(...contents: Array<string | null | undefined>): 
     'preferred_auth_method',
     'chatgpt_base_url',
   ])
-  const runtimeFeatures = new Set(['tool_search', 'tool_search_always_defer_mcp_tools'])
+  const runtimeFeatures = new Set(['tool_search', 'tool_search_always_defer_mcp_tools', 'auto_compaction'])
 
   let arraySectionIndex = 0
   for (const content of contents) {
     if (!content?.trim()) continue
     let section = ''
     let sectionKey = ''
-    const sectionScanState: TomlArrayScanState = { quote: null, multiline: false }
     const lines = content.split(/\r?\n/)
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
       const line = lines[lineIndex]
-      if (sectionScanState.multiline) {
-        const sectionBlock = sections.get(sectionKey)
-        if (sectionBlock && section !== 'features' && !isManagedCodexSection(section)) {
-          sectionBlock.lines.push(line)
-        }
-        scanTomlArrayBrackets(line, sectionScanState)
-        continue
-      }
       const arrayHeader = line.match(/^\s*\[\[([^\]]+)\]\]\s*$/)
       if (arrayHeader) {
         section = arrayHeader[1].trim()
         sectionKey = `array:${arraySectionIndex++}`
-        sections.set(sectionKey, { header: line.trim(), lines: [] })
+        sections.set(sectionKey, { header: line.trim(), entries: [], assignmentIndexes: new Map() })
         continue
       }
       const tableHeader = line.match(/^\s*\[([^\]]+)\]\s*$/)
       if (tableHeader) {
         section = tableHeader[1].trim()
         sectionKey = `table:${section}`
-        if (!sections.has(sectionKey)) sections.set(sectionKey, { header: line.trim(), lines: [] })
+        if (!sections.has(sectionKey)) {
+          sections.set(sectionKey, { header: line.trim(), entries: [], assignmentIndexes: new Map() })
+        }
         continue
       }
-      const assignment = line.match(/^\s*([A-Za-z0-9_.-]+)\s*=/)
+      const assignment = readTomlAssignment(lines, lineIndex)
+      if (assignment) lineIndex = assignment.endIndex
+      const assignmentKey = assignment ? JSON.stringify(assignment.key) : ''
+      const settingName = assignment?.key.length === 1 ? assignment.key[0] : ''
       if (!section) {
-        if (assignment && !runtimeKeys.has(assignment[1])) {
-          let mergedLine = line
-          const scanState: TomlArrayScanState = { quote: null, multiline: false }
-          let bracketDepth = scanTomlArrayBrackets(line.slice(line.indexOf('=') + 1), scanState)
-          while ((bracketDepth > 0 || scanState.multiline) && lineIndex + 1 < lines.length) {
-            lineIndex += 1
-            const nextLine = lines[lineIndex]
-            mergedLine += `\n${nextLine}`
-            bracketDepth += scanTomlArrayBrackets(nextLine, scanState)
-          }
-          topLevel.set(assignment[1], mergedLine)
+        if (assignment && !runtimeKeys.has(settingName)) {
+          topLevel.set(assignmentKey, assignment.lines.join('\n'))
         }
         continue
       }
       if (section === 'features') {
-        if (assignment && !runtimeFeatures.has(assignment[1])) featureLines.set(assignment[1], line)
-        scanTomlArrayBrackets(line, sectionScanState)
+        if (assignment && !runtimeFeatures.has(settingName)) {
+          featureLines.set(assignmentKey, assignment.lines.join('\n'))
+        }
         continue
       }
-      if (isManagedCodexSection(section)) {
-        scanTomlArrayBrackets(line, sectionScanState)
-        continue
-      }
+      if (isManagedCodexSection(section)) continue
       const sectionBlock = sections.get(sectionKey)
-      if (sectionBlock && line.trim()) sectionBlock.lines.push(line)
-      scanTomlArrayBrackets(line, sectionScanState)
+      if (!sectionBlock || !line.trim()) continue
+      if (!assignment) {
+        sectionBlock.entries.push([line])
+        continue
+      }
+
+      const previousIndex = sectionBlock.assignmentIndexes.get(assignmentKey)
+      if (previousIndex === undefined) {
+        sectionBlock.assignmentIndexes.set(assignmentKey, sectionBlock.entries.length)
+        sectionBlock.entries.push(assignment.lines)
+      } else {
+        sectionBlock.entries[previousIndex] = assignment.lines
+      }
     }
   }
 
   const sectionBlocks: string[] = []
-  for (const [key, { header, lines }] of sections) {
+  for (const [key, { header, entries }] of sections) {
+    const lines = entries.flat()
     if (lines.length || key.startsWith('array:')) {
       sectionBlocks.push(lines.length ? `${header}\n${lines.join('\n')}` : header)
     }
@@ -1502,7 +1472,7 @@ function codexMcpConfigToml(
     if (Array.isArray(server.args) && server.args.length) lines.push(`args = ${tomlStringArray(server.args.map(String))}`)
     if (disabledManaged.has(item.name)) lines.push('enabled = false')
     lines.push(`startup_timeout_sec = ${typeof server.startup_timeout_sec === 'number' ? server.startup_timeout_sec : 120}`)
-    if (item.toolset === 'use') lines.push(`tool_timeout_sec = ${Math.max(360, Number(server.tool_timeout_sec) || 0)}`)
+    if (item.toolset === 'use' || item.toolset === 'plan') lines.push(`tool_timeout_sec = ${Math.max(360, Number(server.tool_timeout_sec) || 0)}`)
     if (server.env && typeof server.env === 'object' && !Array.isArray(server.env)) {
       lines.push(`env = ${tomlInlineStringTable(server.env as Record<string, string>)}`)
     }
@@ -1670,11 +1640,12 @@ function piMcpConfig(profile: string, ...externalContents: Array<string | null |
     .map((item) => {
     const server = managedHermesMcpServerConfig('pi', profile, item.name, item.toolset)
     const requestTimeoutMs = item.toolset === 'api' ? 120_000 : item.toolset === 'use' ? 360_000 : 1_860_000
+    const interaction = item.toolset === 'plan'
     return [item.name, {
       ...server,
-      lifecycle: 'lazy',
-      directTools: false,
-      toolPrefix: 'none',
+      lifecycle: interaction ? 'eager' : 'lazy',
+      directTools: interaction,
+      toolPrefix: interaction ? 'server' : 'none',
       requestTimeoutMs,
     }]
   }))
@@ -1698,6 +1669,7 @@ function opencodeMcpServerConfig(server: Record<string, unknown>, enabled: boole
       type: 'local',
       command: [command, ...args],
       enabled,
+      ...(typeof server.timeout === 'number' ? { timeout: server.timeout } : {}),
       ...(server.env && typeof server.env === 'object' && !Array.isArray(server.env)
         ? { environment: server.env }
         : {}),
@@ -1707,6 +1679,7 @@ function opencodeMcpServerConfig(server: Record<string, unknown>, enabled: boole
     type: 'remote',
     url: String(server.url || ''),
     enabled,
+    ...(typeof server.timeout === 'number' ? { timeout: server.timeout } : {}),
     ...(server.headers && typeof server.headers === 'object' && !Array.isArray(server.headers)
       ? { headers: server.headers }
       : {}),
@@ -1772,6 +1745,7 @@ function opencodeRuntimeConfig(
     model?: string
     baseUrl?: string
     systemPrompt?: string
+    contextPolicy?: CodingAgentContextPolicy
   },
   ...existingContents: Array<string | null | undefined>
 ): string {
@@ -1814,11 +1788,21 @@ function opencodeRuntimeConfig(
               // Always forward images; let the upstream model handle support.
               attachment: true,
               modalities: { input: ['text', 'image'], output: ['text'] },
+              ...(runtime.contextPolicy ? { limit: {
+                context: runtime.contextPolicy.contextWindow,
+                input: runtime.contextPolicy.contextWindow,
+                output: runtime.contextPolicy.outputLimit,
+              } } : {}),
             },
           },
         },
       },
     } : {}),
+    ...(runtime.contextPolicy ? { compaction: {
+      ...(config.compaction && typeof config.compaction === 'object' ? config.compaction : {}),
+      auto: true,
+      reserved: runtime.contextPolicy.contextWindow - runtime.contextPolicy.triggerTokens,
+    } } : {}),
     ...((inheritedInstructions.length || runtime.systemPrompt) ? {
       instructions: [...new Set([
         ...inheritedInstructions,
@@ -1869,9 +1853,9 @@ export function getCodingAgentManagedMcpServerConfigs(
       const requestTimeoutMs = item.toolset === 'api' ? 120_000 : item.toolset === 'use' ? 360_000 : 1_860_000
       return [item.name, {
         ...server,
-        lifecycle: 'lazy',
-        directTools: false,
-        toolPrefix: 'none',
+        lifecycle: item.toolset === 'plan' ? 'eager' : 'lazy',
+        directTools: item.toolset === 'plan',
+        toolPrefix: item.toolset === 'plan' ? 'server' : 'none',
         requestTimeoutMs,
         ...(disabledManaged.has(item.name) ? { enabled: false } : {}),
       }]
@@ -1880,7 +1864,7 @@ export function getCodingAgentManagedMcpServerConfigs(
       return [item.name, {
         ...server,
         startup_timeout_sec: 120,
-        ...(item.toolset === 'use' ? { tool_timeout_sec: Math.max(360, Number(server.tool_timeout_sec) || 0) } : {}),
+        ...((item.toolset === 'use' || item.toolset === 'plan') ? { tool_timeout_sec: Math.max(360, Number(server.tool_timeout_sec) || 0) } : {}),
         ...(disabledManaged.has(item.name) ? { enabled: false } : {}),
       }]
     }
@@ -2754,8 +2738,11 @@ export function getCodingAgentDefinition(id: string): CodingAgentDefinition | nu
 }
 
 export function withCodingAgentRegistry(id: CodingAgentId, args: string[]): string[] {
+  // DSH's native dependencies share a process-wide FFI type registry; duplicate
+  // copies can crash plugin startup after an otherwise successful npm update.
+  const installOptions = id === 'dsh' && args[0] === 'install' ? ['--prefer-dedupe'] : []
   return id === 'codex' || id === 'grok' || id === 'opencode' || id === 'dsh'
-    ? [...args, `--registry=${OFFICIAL_NPM_REGISTRY}`]
+    ? [...args, ...installOptions, `--registry=${OFFICIAL_NPM_REGISTRY}`]
     : [...args]
 }
 
@@ -3189,6 +3176,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     throw err
   }
 
+  const mcpCapabilities = studioMcpCapabilities(getCodingAgentManagedMcpServerConfigs(tool.id, input.profile || 'default'))
   const mode = input.mode === 'global' ? 'global' : 'scoped'
   if (mode === 'global') {
     const scope = normalizeConfigScope({ profile: input.profile, provider: 'global' })
@@ -3248,7 +3236,9 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       }
     }
     const rootDir = getScopedRuntimeConfigRoot(tool.id, scope, input)
-    const systemPrompt = String(input.groupSystemPrompt || '').trim() || getSystemPrompt()
+    const systemPrompt = input.groupSystemPrompt?.trim()
+      ? [input.groupSystemPrompt.trim(), studioMcpUsageGuidelines(mcpCapabilities)].filter(Boolean).join('\n\n')
+      : getSystemPrompt(undefined, { mcpCapabilities })
     await mkdir(rootDir, { recursive: true })
 
     let promptFile = ''
@@ -3378,8 +3368,13 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   const preset = PROVIDER_PRESETS.find(item => item.value === provider)
   const apiMode = freeRuntime?.apiMode || normalizeLaunchApiMode(input.apiMode, preset?.api_mode || 'chat_completions')
   const reasoningEffort = String(input.reasoningEffort || '').trim()
+  const contextPolicy = await codingAgentContextPolicy({ profile: scope.profile, provider, model })
   const groupSystemPrompt = String(input.groupSystemPrompt || '').trim()
-  const scopedSystemPrompt = tool.id === 'pi' && groupSystemPrompt ? getSystemPrompt() : groupSystemPrompt || getSystemPrompt()
+  const scopedSystemPrompt = tool.id === 'pi' && groupSystemPrompt
+    ? getSystemPrompt(undefined, { mcpCapabilities })
+    : groupSystemPrompt
+      ? [groupSystemPrompt, studioMcpUsageGuidelines(mcpCapabilities)].filter(Boolean).join('\n\n')
+      : getSystemPrompt(undefined, { mcpCapabilities })
   const isolatedInput = tool.id === 'pi' || tool.id === 'dsh'
     ? {
         ...input,
@@ -3411,7 +3406,6 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   let env: Record<string, string> = {}
 
   if (tool.id === 'claude-code') {
-    const contextWindow = getModelContextLength({ profile: scope.profile, provider, model })
     const proxyTarget = baseUrl && (apiKey || freeRuntime)
       ? registerClaudeCodeProxyTarget({
           provider,
@@ -3449,8 +3443,12 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
         ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: modelName,
         ANTHROPIC_DEFAULT_OPUS_MODEL: model,
         ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: modelName,
-        CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(contextWindow),
-        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(CLAUDE_CODE_AUTO_COMPACT_PERCENT),
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(contextPolicy.contextWindow),
+        // Claude clamps its rolling window to >=100K. Adjust the percentage
+        // against that window so a smaller Studio model still compacts early.
+        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(claudeCompactionPercent(contextPolicy)),
+        DISABLE_AUTO_COMPACT: '0',
+        DISABLE_COMPACT: '0',
         ENABLE_TOOL_SEARCH: 'true',
       },
     }
@@ -3525,6 +3523,9 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       `model_catalog_json = ${JSON.stringify(catalogPath)}`,
       `model_provider = ${JSON.stringify(providerId)}`,
       `model = ${JSON.stringify(model)}`,
+      `model_context_window = ${contextPolicy.contextWindow}`,
+      `model_auto_compact_token_limit = ${contextPolicy.triggerTokens}`,
+      'model_auto_compact_token_limit_scope = "total"',
       'model_reasoning_summary = "auto"',
       ...(reasoningEffort ? [`model_reasoning_effort = ${JSON.stringify(reasoningEffort)}`] : []),
       `developer_instructions = ${tomlMultilineString(effectiveCodexInstructions)}`,
@@ -3596,7 +3597,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     await mkdir(sessionsDir, { recursive: true })
     await writeRuntimeFile('studio_extension', PI_STUDIO_EXTENSION_FILE, piStudioRuntimeExtension())
     await writeRuntimeFile('dynamic_prompt', PI_DYNAMIC_PROMPT_FILE, '')
-    await writeRuntimeFile('settings', 'settings.json', piSettingsConfig(settings, studioExtensionPath))
+    await writeRuntimeFile('settings', 'settings.json', piSettingsConfig(piCompactionSettings(settings, contextPolicy, model), studioExtensionPath))
     await writeRuntimeFile('models', 'models.json', piModelsConfig({
       baseUrl: piBaseUrl,
       apiKey: piApiKey,
@@ -3663,12 +3664,6 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
           chatSessionId: isolatedInput.sessionId,
         })
       : null
-    const capabilities = getModelRuntimeCapabilities({
-      profile: scope.profile,
-      provider,
-      model,
-      ...(provider === 'custom' || provider.startsWith('custom:') ? { fallbackContextLength: 128_000 } : {}),
-    })
     const baseConfigRoot = getScopedConfigRoot(tool.id, scope)
     const globalGrokHome = process.env.GROK_HOME?.trim() || join(getGlobalConfigHome(), '.grok')
     const globalInstructions = await safeReadFile(join(globalGrokHome, 'AGENTS.md')) || ''
@@ -3682,8 +3677,9 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       model,
       displayName: displayNameForModel(model),
       proxyBaseUrl: proxyTarget?.baseUrl || baseUrl,
-      contextWindow: capabilities.contextWindow,
-      outputLimit: capabilities.outputLimit,
+      contextWindow: contextPolicy.contextWindow,
+      outputLimit: contextPolicy.outputLimit,
+      contextPolicy,
       reasoningEffort,
       systemPrompt: scopedSystemPrompt,
       userInstructions: [globalInstructions.trim(), scopedInstructions.trim()]
@@ -3700,6 +3696,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     files.push(...prepared.files)
     env = {
       GROK_HOME: rootDir,
+      GROK_AUTO_COMPACT_THRESHOLD_PERCENT: String(compactionPercent(contextPolicy.threshold)),
       [GROK_API_KEY_ENV]: proxyTarget?.token || apiKey,
     }
     args = [
@@ -3718,7 +3715,8 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       ...await dshHost.runtimeInput(),
       sharedSkills: join(getGlobalConfigHome(), '.agents', 'skills'),
       rootDir, systemPrompt: scopedSystemPrompt, model, baseUrl: proxyTarget.baseUrl,
-      contextWindow: capabilities.contextWindow, outputLimit: capabilities.outputLimit,
+      contextWindow: contextPolicy.contextWindow, outputLimit: contextPolicy.outputLimit,
+      contextPolicy,
       imageInput: capabilities.input.includes('image'),
       reasoningEffort,
       managedMcp: getCodingAgentManagedMcpServerConfigs('dsh', scope.profile),
@@ -3750,6 +3748,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       model,
       baseUrl: proxyTarget?.baseUrl || baseUrl,
       systemPrompt: promptPath,
+      contextPolicy,
     })
     await writeFile(configPath, runtimeConfig, 'utf-8')
     files.push(
@@ -3992,14 +3991,14 @@ export function stopCodingAgentRun(sessionId: string): { stopped: boolean } {
   return { stopped: codingAgentRunManager.stop(sessionId) }
 }
 
-export function invalidateCodingAgentProviderRuntime(profileInput: string, providerInput: string): {
+export function invalidateCodingAgentProviderRuntime(profileInput: string, providerInput?: string): {
   invalidatedRuns: number
   deferredRuns: number
 } {
   const profile = normalizeScopeSegment(profileInput, 'default', 'profile')
-  const providerIdentity = normalizeProviderIdentity(providerInput)
+  const providerIdentity = providerInput ? normalizeProviderIdentity(providerInput) : undefined
   const result = codingAgentRunManager.invalidateMatching(launch => (
-    launch.profile === profile && launch.provider === providerIdentity
+    launch.profile === profile && (providerIdentity ? launch.provider === providerIdentity : launch.mode === 'scoped')
   ))
   return { invalidatedRuns: result.invalidated, deferredRuns: result.deferred }
 }
