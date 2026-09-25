@@ -14,6 +14,8 @@
 
 **最近一次合并（2026-09-25）**：上游 `eaa69053 fix: hide context limits for coding-agent chats (#3174)`。无冲突（ChatInput.vue 自动合并，上游改动只涉及 context-limit 显示，与自研队列/缩放无关），自研标记全部保留。
 
+**2026-09-25 部署记录**：4 台 PVE（931/935/936/961）已就地 `git pull origin sync` + build + 重启，全部 0.7.24，浏览器验收（加法题）4/4 通过。桌面版 0.7.24 exe 已装本机。961 曾因本地 package-lock.json 改动挡住 merge，`git checkout --` 后解决。
+
 部署到 5 个终端：**4 台 PVE 虚拟机（931 / 935 / 936 / 961）+ 1 台 Windows 桌面版**。
 
 完整更新流程见 [`docs/upstream-sync-and-fleet-deploy.md`](docs/upstream-sync-and-fleet-deploy.md)。
