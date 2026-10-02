@@ -63,6 +63,7 @@
 |------|------|
 | `client/src/utils/desktop-browser.ts` | `DEFAULT_LINK_OPEN_TARGET` 从 `hermes-studio`（内置浏览器）改为 `default-browser`（系统默认浏览器）。点 URL 不再进内置浏览器（指纹/登录态/代理硬伤）；可到 设置→显示→链接打开方式 切回 |
 | `desktop/src/main/browser/browser-manager.ts` | `setViewport` 乘主窗口 `getZoomFactor()`：前端上报 CSS px rect，`setBounds` 需 DIP，字体缩放（zoom patch）后两者不等导致内嵌视图错位，现已换算 |
+| `desktop/src/main/index.ts` | `hermes-desktop:open-external-url` 优先探测并 `spawn` 系统 Chrome 打开链接（`findChromeExecutable`），Chrome 未装才回落 `shell.openExternal`。系统默认浏览器是夸克（QuarkHTM），Win11 无可靠命令行改默认（SetUserFTA 已商业化且 21H1+ 失效），故在 Hermes 层强制 Chrome |
 
 ---
 

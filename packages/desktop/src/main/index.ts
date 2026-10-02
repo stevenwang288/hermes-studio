@@ -18,6 +18,7 @@ import {
 } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { spawn } from 'node:child_process'
 import {
   getToken,
   setWebUiRestartRequestHandler,
@@ -1170,12 +1171,31 @@ ipcMain.handle('hermes-desktop:open-external-url', async (event, url?: unknown) 
   if (!externalUrl) return false
 
   try {
+    // [user-controlled patch] 链接优先用 Chrome 打开(2026-10-02):
+    // 系统默认浏览器可能是夸克等第三方, 统一走 Chrome(指纹/登录态/代理正常)。
+    // Chrome 未安装时回落系统默认浏览器。
+    const chromePath = findChromeExecutable()
+    if (chromePath) {
+      const child = spawn(chromePath, [externalUrl], { detached: true, stdio: 'ignore' })
+      child.unref()
+      return true
+    }
     await shell.openExternal(externalUrl)
     return true
   } catch {
     return false
   }
 })
+
+// [user-controlled patch] 探测系统 Chrome 可执行文件路径(2026-10-02)
+function findChromeExecutable(): string | undefined {
+  const candidates = [
+    process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe') : '',
+    process.env.ProgramFiles ? join(process.env.ProgramFiles, 'Google', 'Chrome', 'Application', 'chrome.exe') : '',
+    process.env['ProgramFiles(x86)'] ? join(process.env['ProgramFiles(x86)'], 'Google', 'Chrome', 'Application', 'chrome.exe') : '',
+  ]
+  return candidates.find(candidate => candidate && existsSync(candidate))
+}
 
 function browserForEvent(event: IpcMainInvokeEvent): BrowserManager {
   if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) throw new Error('Desktop browser IPC is only available to the main window')
