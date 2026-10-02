@@ -3,7 +3,10 @@ import { desktopBridge, hasDesktopBrowserBridge } from './desktop-bridge'
 export type LinkOpenTarget = 'hermes-studio' | 'default-browser'
 
 export const LINK_OPEN_TARGET_STORAGE_KEY = 'hermes_link_open_target'
-export const DEFAULT_LINK_OPEN_TARGET: LinkOpenTarget = 'hermes-studio'
+// [user-controlled patch] 默认改为系统默认浏览器打开链接(2026-10-02):
+// 内置浏览器(WebContentsView)存在指纹/登录态/代理/布局错位硬伤, 点 URL 默认走系统浏览器。
+// 想用内置浏览器的用户可在 设置→显示→链接打开方式 里切回 hermes-studio。
+export const DEFAULT_LINK_OPEN_TARGET: LinkOpenTarget = 'default-browser'
 
 export function getLinkOpenTarget(): LinkOpenTarget {
   if (typeof window === 'undefined') return DEFAULT_LINK_OPEN_TARGET

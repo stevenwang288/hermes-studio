@@ -147,11 +147,15 @@ export class BrowserManager {
   }
 
   setViewport(bounds: BrowserBounds, visible: boolean): DesktopBrowserState {
+    // [zoom patch 关联] 前端上报的是 CSS 像素 rect, WebContentsView.setBounds 需要 DIP。
+    // 桌面版字体缩放(webContents.setZoomLevel)改变 zoomFactor 后两者不再相等, 导致内嵌视图错位。
+    // 这里统一乘主窗口 zoomFactor 换算, zoomFactor=1 时行为与原来完全一致。
+    const zoom = this.window?.webContents.getZoomFactor() ?? 1
     this.bounds = {
-      x: Math.max(0, Math.round(bounds.x)),
-      y: Math.max(0, Math.round(bounds.y)),
-      width: Math.max(1, Math.round(bounds.width)),
-      height: Math.max(1, Math.round(bounds.height)),
+      x: Math.max(0, Math.round(bounds.x * zoom)),
+      y: Math.max(0, Math.round(bounds.y * zoom)),
+      width: Math.max(1, Math.round(bounds.width * zoom)),
+      height: Math.max(1, Math.round(bounds.height * zoom)),
     }
     this.visible = visible
     this.syncViews()
