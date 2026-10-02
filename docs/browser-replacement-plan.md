@@ -1,7 +1,17 @@
 # 内置浏览器替换方案（WebContentsView → 系统 Chrome/Edge + CDP）
 
-> 作者：99号  日期：2026-10-02  状态：方案待定
+> 作者：99号  日期：2026-10-02  状态：**已部分实施（2026-10-02）**
 > 背景：升级 0.7.27 后用户提出——内置浏览器体验/能力不像"正常浏览器"，要求评估替换。
+
+## 0. 实施记录（2026-10-02）
+
+| # | 决策 | 落地 |
+|---|---|---|
+| 1 | 用户点 URL 默认打开方式 | **已实施**：`desktop-browser.ts` 默认 `default-browser` + `desktop/src/main/index.ts` 的 `open-external-url` **优先 spawn 系统 Chrome**（探测 3 个标准路径，未装回落系统默认）。原因：系统默认浏览器是夸克（QuarkHTM），Win11 无可靠命令行改默认（SetUserFTA 已商业化且 21H1+ 失效，官方只支持 GUI） |
+| 2 | 内置浏览器错位 | **已修复**：`browser-manager.ts` `setViewport` 乘主窗口 `getZoomFactor()`（字体缩放 zoom patch 导致 CSS px/DIP 不一致） |
+| 3 | 方案 A（CDP 接管系统 Chrome 重构内置浏览器） | **未实施**（用户选择 Hermes 层强制 Chrome，不动系统默认；内置浏览器保留为手动打开面板的兜底） |
+
+> 结论：用户诉求（"点 URL 用正常浏览器"）已通过 Hermes 层达成，**系统级默认浏览器仍是夸克**，方案 A 仅在需要"面板内嵌正常浏览器"时才值得实施。
 
 ---
 

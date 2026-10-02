@@ -2,7 +2,7 @@
 
 > 对象仓库：`stevenwang288/hermes-studio`（上游 `EKKOLearnAI/hermes-studio` 的 fork）
 > 覆盖终端：4 台 PVE 虚拟机 + 1 台 Windows 桌面版
-> 最后校准：2026-09-22
+> 最后校准：2026-10-02（0.7.27：sync 现为 4 项自研；936 构建须用 `/home/ubuntu/.nvm` 绝对路径）
 
 ---
 
@@ -102,7 +102,9 @@ packages/client/src/components/hermes/chat/MessageList.vue
 packages/client/src/components/hermes/chat/ChatInput.vue
 packages/client/src/components/hermes/chat/ChatPanel.vue
 packages/client/src/api/studio/chat.ts
-packages/desktop/src/main/index.ts
+packages/client/src/utils/desktop-browser.ts          # 自研④: 链接默认打开方式
+packages/desktop/src/main/browser/browser-manager.ts  # 自研④: setViewport zoom 换算
+packages/desktop/src/main/index.ts                     # 自研②zoom + 自研④Chrome 优先
 tests/server/chat-run-promote.test.ts
 ```
 

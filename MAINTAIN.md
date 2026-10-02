@@ -10,7 +10,7 @@
 
 `stevenwang288/hermes-studio` = 上游 `EKKOLearnAI/hermes-studio` 的 fork。
 
-- 以官方基线为底，**只保留 3 项自研功能**，其余一律跟随上游（品牌/图标/安装路径都是官方的，不做 fork 标记）
+- 以官方基线为底，**只保留 4 项自研功能**，其余一律跟随上游（品牌/图标/安装路径都是官方的，不做 fork 标记）
 - **唯一有效分支：`sync`**。`main` 是废弃的旧基线，不要用
 - 部署到 **5 个终端**：4 台 PVE 虚拟机 + 1 台 Windows 桌面版
 
@@ -109,13 +109,14 @@ node scripts/verify-fleet.mjs 935      # 单台
 
 ---
 
-## 3. 3 项自研功能（冲突时保留，别弄丢）
+## 3. 4 项自研功能（冲突时保留，别弄丢）
 
 | # | 功能 | 主要文件 |
 |---|------|----------|
 | 1 | **消息队列**：回复生成中发新消息不打断，排队等待，三种方式逐条放行 | `server/src/modules/studio/sockets/chat-run.ts`<br>`server/src/modules/studio/services/chat-run/abort.ts`<br>`server/src/modules/studio/contracts/runs/session.ts`<br>`client/src/stores/hermes/chat.ts`<br>`client/src/components/hermes/chat/MessageList.vue`<br>`client/src/components/hermes/chat/ChatInput.vue`<br>`client/src/api/studio/chat.ts` |
 | 2 | **Windows 桌面版字体缩放**：Ctrl + `+`/`-`/`0`，步进 0.5，范围 −3~4，持久化 `userData/desktop-zoom.json` | `desktop/src/main/index.ts` |
 | 3 | **路径完整显示**：workspace 徽标显示全路径，不截断 | `client/src/components/hermes/chat/ChatPanel.vue` |
+| 4 | **链接默认用 Chrome 打开 + 内置浏览器错位修复**（2026-10-02）：点 URL 不再进内置 WebContentsView（指纹/登录态/代理硬伤），优先 `spawn` 系统 Chrome；`setViewport` 乘 zoomFactor 修复字体缩放后内嵌浏览器错位 | `client/src/utils/desktop-browser.ts`<br>`desktop/src/main/browser/browser-manager.ts`<br>`desktop/src/main/index.ts` |
 
 测试：`tests/server/chat-run-promote.test.ts`
 
@@ -134,7 +135,7 @@ node scripts/verify-fleet.mjs 935      # 单台
 |------|-----|----------|----------|------|
 | `931` | 192.168.9.31 | `/opt/hermes-studio-ekko` | `systemctl restart hermes-web-ui hermes-gateway` | — |
 | `935` | 192.168.9.35 | `/opt/hermes-studio` | `systemctl restart hermes-studio hermes-gateway` | — |
-| `936` | 192.168.9.36 | `/opt/hermes-studio-fork` | `systemctl restart hermes-web-ui` | 服务跑在 `ubuntu` 用户下；磁盘紧张（约剩 8.5G） |
+| `936` | 192.168.9.36 | `/opt/hermes-studio-fork` | `systemctl restart hermes-web-ui` | 服务跑在 `ubuntu` 用户下；磁盘紧张（约剩 6.4G）；nvm 在 `/home/ubuntu/.nvm`（root 的 `$HOME` 没有）→ 构建必须 `export PATH=/home/ubuntu/.nvm/versions/node/v24.20.0/bin` + `chown -R ubuntu:ubuntu dist packages` |
 | `961` | 192.168.9.61 | `/opt/hermes-studio` | `systemctl restart hermes-studio hermes-gateway` | — |
 
 SSH：`ssh pve-vm-931` / `-935` / `-936` / `-961`（root，密钥 `~/.ssh/id_ed25519`）
@@ -332,6 +333,7 @@ tasklist | grep -i "Ekko Studio"
 | 现象 | 处理 |
 |------|------|
 | git 弹「选择凭据助手」 | 系统级 `credential.helper=helper-selector`。已改全局 `manager` |
+| PVE `git pull` 报 `GnuTLS handshake failed` / `HTTP2 framing layer` / `connect timeout`（间歇性） | PVE→GitHub 网络抖动，**重试即可**（等 1~2 分钟或重跑部署脚本）。持续失败用 git bundle 内网直传（见第 3 步） |
 | `TLS ... unexpected eof while reading` | 代理节点连不上境外 → 让用户切 V2rayN 节点 |
 | push 长时间无输出 | 同上。别硬等，先测代理 |
 | 构建报 `SAFE_DELETE_BULK_CONFIRM_REQUIRED` | WorkBuddy 沙箱的批量删除保护（vite 清 `dist/client/assets`）。**不是代码错误** → `mv dist dist.old && npm run build` |
