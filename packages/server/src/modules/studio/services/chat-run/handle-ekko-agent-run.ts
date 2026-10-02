@@ -1,4 +1,6 @@
+import { completeRunUsage } from '../../repositories/run-usage-store'
 import { studioMcpUsageGuidelines } from '../../public/runs/prompt'
+import { leaseEkkoMcpServers } from './ekko-mcp-lease'
 import { studioMcpCapabilities } from '../../public/runs/mcp-capabilities'
 import { saveTaskPlan } from '../../repositories/task-plan-store'
 import type { TaskPlanSnapshot } from '../../contracts/task-plan'
@@ -653,15 +655,33 @@ export async function handleEkkoAgentRun(
     created_at: plan.createdAt,
     updated_at: plan.updatedAt,
   })
+  state.nativeUsageSource = undefined
+  let interruptedMessagePersisted = false
   let assistantText = ''
   let assistantReasoning = ''
   let assistantMessageId: string | null = null
   let runId = ''
+  const finalizeInterruptedUsage = () => {
+    if (!runId) return undefined
+    if (!interruptedMessagePersisted && state.finalizeRunUsage !== finalizeInterruptedUsage) return undefined
+    if (!interruptedMessagePersisted) {
+      if (assistantText.trim() || assistantReasoning.trim() || !assistantMessageId) {
+        const { ids } = persistRunMessages(state, { sessionId, runMarker: runId, appendToState: true,
+          messages: [{ role: 'assistant', content: assistantText, reasoning: assistantReasoning || null,
+            reasoning_content: assistantReasoning || null, finish_reason: 'interrupted' }] })
+        if (ids[0] != null) assistantMessageId = String(ids[0])
+      }
+      interruptedMessagePersisted = true
+    }
+    return completeRunUsage(sessionId, runId, assistantMessageId)
+  }
+  state.finalizeRunUsage = finalizeInterruptedUsage
   let workspaceDiffRunId = ''
   let workspaceDiffCompleted = false
   let usageInput = 0
   let usageOutput = 0
   let usageCallIndex = 0
+  let modelStartedAt: number | undefined
   let contextEstimate: any
   let parentUsagePersisted = false
   const pendingToolGroups = new Map<string, PendingToolGroup>()
@@ -894,7 +914,16 @@ export async function handleEkkoAgentRun(
     group.results.set(toolCallId, { toolName, result })
     persistCompletedToolGroup(group)
   }
+  let releaseMcp = () => {}
+  let foregroundEnded = false
+  const mcpBackgroundTasks = new Set<string>()
+  const releaseIdleMcp = () => { if (foregroundEnded && !mcpBackgroundTasks.size) releaseMcp() }
   const handleRuntimeEvent = (event: AgentRuntimeEvent) => {
+    if (event.type === 'subagent.start' && event.background) mcpBackgroundTasks.add(event.subagentId)
+    if (event.type === 'subagent.complete' && event.background) {
+      mcpBackgroundTasks.delete(event.subagentId)
+      releaseIdleMcp()
+    }
     if ('runId' in event) runId = event.runId
     if (event.type === 'run.started') {
       startWorkspaceRunDiff(event.runId)
@@ -941,6 +970,8 @@ export async function handleEkkoAgentRun(
         run_id: event.runId,
         delta: event.text,
       })
+    } else if (event.type === 'model.started') {
+      modelStartedAt = performance.now()
     } else if (event.type === 'model.usage') {
       usageInput += event.usage.inputTokens || 0
       usageOutput += event.usage.outputTokens || 0
@@ -948,6 +979,8 @@ export async function handleEkkoAgentRun(
       recordSessionUsage({
         sessionId,
         runId: `${event.runId}:step:${event.step}:call:${usageCallIndex}`,
+        parentRunId: event.runId,
+        apiDuration: modelStartedAt == null ? undefined : (performance.now() - modelStartedAt) / 1000,
         source: 'ekko_agent',
         agent: 'ekko_agent',
         usageScope: 'model_call',
@@ -1110,9 +1143,10 @@ export async function handleEkkoAgentRun(
           recordSessionUsage({
             sessionId,
             runId: `${event.runId}:subagent:${event.subagentId}`,
+            parentRunId: event.background ? undefined : event.runId,
             source: 'ekko_agent',
             agent: 'ekko_agent',
-            usageScope: 'model_call',
+            usageScope: 'run',
             purpose: event.background ? 'ekko-background-subtask' : 'ekko-subtask',
             apiCalls: event.apiCalls,
             usage: {
@@ -1121,6 +1155,8 @@ export async function handleEkkoAgentRun(
               cacheReadTokens: event.cacheReadTokens,
               cacheWriteTokens: event.cacheWriteTokens,
               reasoningTokens: event.reasoningTokens,
+              costUsd: event.costUsd,
+              costSource: event.costSource,
             },
             profile,
             model: modelConfig.model,
@@ -1232,6 +1268,9 @@ export async function handleEkkoAgentRun(
   }
 
   try {
+    const mcpLease = await leaseEkkoMcpServers(mcpServers, { sessionId, profile,
+      userId: socket.data?.user?.id, signal: abortController.signal })
+    releaseMcp = mcpLease.dispose
     logger.info('[chat-run-socket] starting ekko-agent run for session %s', sessionId)
     const toolContext = {
       cwd: workspace,
@@ -1241,7 +1280,8 @@ export async function handleEkkoAgentRun(
       sessionId,
       profileId: profile,
       browserSessionId: sessionId,
-      mcpServers,
+      mcpServers: mcpLease.servers,
+      mcpSessionSignal: mcpLease.signal,
       timeoutMs: 120_000,
       signal: abortController.signal,
       requestToolApproval: (request: AgentToolApprovalRequest) => waitForEkkoToolApproval(request, {
@@ -1521,6 +1561,7 @@ export async function handleEkkoAgentRun(
         autonomous: data.autonomous === true,
         delegation_id: data.background_delegation_id,
         workspace_run_change: completeWorkspaceRunDiff(),
+        run_usage: completeRunUsage(sessionId, runId, assistantMessageId),
       })
       return
     }
@@ -1595,10 +1636,13 @@ export async function handleEkkoAgentRun(
       autonomous: data.autonomous === true,
       delegation_id: data.background_delegation_id,
       workspace_run_change: workspaceRunChange,
+      run_usage: completeRunUsage(sessionId, runId || result.runId, assistantMessageId),
     })
   } catch (err) {
     if (abortController.signal.aborted || isAbortError(err)) {
       logger.info('[chat-run-socket] ekko-agent run aborted for session %s', sessionId)
+      try { finalizeInterruptedUsage() }
+      catch (usageError) { logger.warn({ err: usageError, sessionId }, '[run-usage] interrupted Ekko usage failed') }
       completeWorkspaceRunDiff()
       return
     }
@@ -1624,8 +1668,11 @@ export async function handleEkkoAgentRun(
       autonomous: data.autonomous === true,
       delegation_id: data.background_delegation_id,
       workspace_run_change: completeWorkspaceRunDiff(),
+      run_usage: completeRunUsage(sessionId, runId, assistantMessageId),
     })
   } finally {
+    foregroundEnded = true
+    releaseIdleMcp()
     if (!abortController.signal.aborted || state.abortController === abortController) {
       state.isWorking = false
       state.isAborting = false

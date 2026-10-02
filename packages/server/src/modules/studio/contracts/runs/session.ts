@@ -1,6 +1,7 @@
 import type { AgentRuntime } from '../agents/runtime'
 import type { ChatMessage } from './messages'
 import type { RunMode } from './surface'
+import type { RunUsageSummary } from './run-usage'
 
 export interface EkkoBackgroundContinuationContext {
   version: 1
@@ -133,6 +134,9 @@ export interface QueueInsertionControl {
 }
 
 export interface SessionState {
+  /** Snapshot the owning runtime's interrupted turn without waiting for model IO. */
+  finalizeRunUsage?: () => RunUsageSummary | undefined
+  nativeUsageSource?: 'coding_agent'
   pushTargetId?: string
   messages: SessionMessage[]
   messageTotal?: number
@@ -154,6 +158,8 @@ export interface SessionState {
   profile?: string
   inputTokens?: number
   outputTokens?: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
   contextTokens?: number
   bridgeContext?: BridgeContextState
   isAborting?: boolean
@@ -165,7 +171,7 @@ export interface SessionState {
   queueInsertion?: QueueInsertionControl
   responseRun?: ResponseRunState
   source?: ChatRunSource
-  webhookAgent?: 'bridge' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh'
+  webhookAgent?: 'bridge' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor'
   webhookRoomId?: string
   webhookWorkflowId?: string
   webhookWorkflowNodeId?: string
@@ -213,7 +219,7 @@ export interface BridgeContextState {
 }
 
 export type ChatRunSource = 'api_server' | 'cli' | 'coding_agent' | 'global_agent' | 'workflow' | 'group_chat'
-export type ChatCodingAgentId = 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'ekko-agent'
+export type ChatCodingAgentId = 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'ekko-agent'
 
 export interface BridgeCompressionResult {
   messages: ChatMessage[]

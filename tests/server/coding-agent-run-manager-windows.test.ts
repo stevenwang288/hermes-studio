@@ -65,6 +65,7 @@ import {
 import '../../packages/server/src/bootstrap/coding-agent-adapters'
 
 const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
+const windowsCmd = process.env.comspec || 'cmd.exe'
 
 function setPlatform(platform: NodeJS.Platform) {
   Object.defineProperty(process, 'platform', { value: platform })
@@ -80,6 +81,34 @@ afterEach(() => {
 })
 
 describe('coding agent Windows process launch', () => {
+  it('gives every submitted turn its own usage identity when the CLI process is reused', () => {
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(1000)
+    const manager = new CodingAgentRunManager()
+    const run: any = { id: 'persistent-cli', launch: { agentId: 'codex' }, state: {} }
+    vi.spyOn(manager, 'getBySession').mockReturnValue(run)
+    let messageId = 0
+    ;(manager as any).ensureDbSession = vi.fn()
+    ;(manager as any).addUserMessage = () => ++messageId
+    ;(manager as any).touch = vi.fn()
+    ;(manager as any).emitTerminalStatus = vi.fn()
+    ;(manager as any).startWorkspaceRunDiff = vi.fn()
+    ;(manager as any).startCodexExecTurn = vi.fn()
+    manager.send('s', 'first')
+    const firstId = run.usageRunId
+    clock.mockReturnValue(4000)
+    ;(manager as any).finishUsageTiming(run)
+    expect(run.usageDurationSeconds).toBe(3)
+    clock.mockReturnValue(12000)
+    manager.send('s', 'second')
+    expect(run.usageDurationSeconds).toBeUndefined()
+    clock.mockReturnValue(14000)
+    ;(manager as any).finishUsageTiming(run)
+    expect(run.usageDurationSeconds).toBe(2)
+    expect(run.id).toBe('persistent-cli')
+    expect(firstId).toBe('persistent-cli:turn:1')
+    expect(run.usageRunId).toBe('persistent-cli:turn:2')
+  })
+
   it('keeps Grok prompts out of Windows command arguments and settles after process close', () => {
     const grokHome = mkdtempSync(join(tmpdir(), 'hermes-grok-windows-'))
     const originalDatabaseUrl = process.env.DATABASE_URL
@@ -525,7 +554,7 @@ describe('coding agent Windows process launch', () => {
     manager.send('chat-session-pi-1', prompt, { systemPrompt })
 
     const call = testState.spawnCalls[0]
-    expect(call.command).toBe('cmd.exe')
+    expect(call.command).toBe(windowsCmd)
     expect(call.args[3]).toContain('C:\\用户\\管理员\\AppData\\Roaming\\npm\\pi.cmd')
     expect(call.args[3]).toContain('C:\\用户\\会话^ 目录')
     expect(call.args[3]).not.toContain('超长中文内容')
@@ -979,7 +1008,7 @@ describe('coding agent Windows process launch', () => {
     manager.send('chat-session-1', groupInput, { systemPrompt: 'system prompt\nsecond line' })
 
     expect(testState.spawnCalls[0]).toMatchObject({
-      command: 'cmd.exe',
+      command: windowsCmd,
       args: expect.arrayContaining(['/d', '/s', '/c']),
     })
     expect(testState.spawnCalls[0].args[3]).toContain('C:\\Users\\Administrator\\AppData\\Roaming\\npm\\claude.cmd')
@@ -1037,7 +1066,7 @@ describe('coding agent Windows process launch', () => {
     manager.send('chat-session-codex-1', groupInput, { systemPrompt: 'system prompt\nsecond line' })
 
     expect(testState.spawnCalls[0]).toMatchObject({
-      command: 'cmd.exe',
+      command: windowsCmd,
       args: expect.arrayContaining(['/d', '/s', '/c']),
     })
     expect(testState.spawnCalls[0].args[3]).toContain('C:\\Users\\Administrator\\AppData\\Roaming\\npm\\codex.cmd')
@@ -1294,7 +1323,7 @@ describe('coding agent Windows process launch', () => {
     manager.send('chat-session-codex-unicode-1', 'test')
 
     expect(testState.spawnCalls[0]).toMatchObject({
-      command: 'cmd.exe',
+      command: windowsCmd,
       args: expect.arrayContaining(['/d', '/s', '/c']),
     })
     expect(testState.spawnCalls[0].args[3]).toContain('C:\\用户\\管理员\\AppData\\Roaming\\npm\\codex.cmd')
@@ -1330,7 +1359,7 @@ describe('coding agent Windows process launch', () => {
     manager.send('chat-session-codex-quoted-1', 'test')
 
     expect(testState.spawnCalls[0]).toMatchObject({
-      command: 'cmd.exe',
+      command: windowsCmd,
       args: expect.arrayContaining(['/d', '/s', '/c']),
     })
     expect(testState.spawnCalls[0].args[3]).toContain('C:\\nvm4w\\nodejs\\codex.cmd')
