@@ -16,6 +16,8 @@
 - `ChatPanel.vue`：workspace-badge（自研③路径显示）模板+样式保留，上游结构改动已并入
 - `abort.ts`：自研 `contentBlocksToString` 与上游新增 `finalizeAbortedRunUsage` 两个 import **同时保留**（分别被 292/230 行使用）
 
+**2026-10-02 部署记录**：4 台 PVE（931/935/936/961）全部升级 **0.7.27** 并重启，`curl 8648` 探活 4/4 HTTP 200。桌面版 `D:\desk\Ekko.Studio-0.7.27-x64.exe` 已云编译交付。踩坑：①PVE 到 GitHub 偶发 TLS/HTTP2 抖动（gnutls handshake failed / HTTP2 framing），重试即可，勿让脚本在 pull 失败后继续 build（deploy-pve.sh 已修正退出码判断）；②936 的 nvm 在 `/home/ubuntu/.nvm`（root 的 `$HOME` 没有），构建必须 `export PATH=/home/ubuntu/.nvm/versions/node/v24.20.0/bin`；③936 需 `chown -R ubuntu:ubuntu dist packages`。
+
 **2026-09-25 部署记录**：4 台 PVE（931/935/936/961）已就地 `git pull origin sync` + build + 重启，全部 0.7.24，浏览器验收（加法题）4/4 通过。桌面版 0.7.24 exe 已装本机。961 曾因本地 package-lock.json 改动挡住 merge，`git checkout --` 后解决。
 
 部署到 5 个终端：**4 台 PVE 虚拟机（931 / 935 / 936 / 961）+ 1 台 Windows 桌面版**。
