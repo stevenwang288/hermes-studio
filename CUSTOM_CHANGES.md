@@ -5,14 +5,16 @@
 
 本仓库是 `EKKOLearnAI/hermes-studio` 的 fork，**2026-09-16 全新重建**：以官方 v0.7.21 为基线，只合入自研功能，版本号跟随官方（不做 fork 标记，避免启动提示）。
 
-## 当前状态（2026-09-25 校准）
+## 当前状态（2026-10-02 校准）
 
 | 分支 | 版本 | 说明 |
 |------|------|------|
-| `sync` | **0.7.24** | 唯一有效分支。= 上游 `main` 最新 + 3 项自研功能，已通过 `npm run build` + 桌面 `tsc --noEmit` 验证 |
+| `sync` | **0.7.27** | 唯一有效分支。= 上游 `main` 最新 + 3 项自研功能，已通过 `npm run build` + 桌面 `tsc --noEmit` 验证 |
 | `main` | 0.7.21 | 停用的旧基线，**勿用** |
 
-**最近一次合并（2026-09-25）**：上游 `eaa69053 fix: hide context limits for coding-agent chats (#3174)`。无冲突（ChatInput.vue 自动合并，上游改动只涉及 context-limit 显示，与自研队列/缩放无关），自研标记全部保留。
+**最近一次合并（2026-10-02）**：上游 0.7.25 → 0.7.27 共 41 个提交（含 Cursor CLI 集成、浏览器自动化批次、JEV 评估、用量计费、桌面 UI 修复）。**2 个文件冲突，均已解决**：
+- `ChatPanel.vue`：workspace-badge（自研③路径显示）模板+样式保留，上游结构改动已并入
+- `abort.ts`：自研 `contentBlocksToString` 与上游新增 `finalizeAbortedRunUsage` 两个 import **同时保留**（分别被 292/230 行使用）
 
 **2026-09-25 部署记录**：4 台 PVE（931/935/936/961）已就地 `git pull origin sync` + build + 重启，全部 0.7.24，浏览器验收（加法题）4/4 通过。桌面版 0.7.24 exe 已装本机。961 曾因本地 package-lock.json 改动挡住 merge，`git checkout --` 后解决。
 
