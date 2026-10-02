@@ -135,7 +135,7 @@ node scripts/verify-fleet.mjs 935      # 单台
 |------|-----|----------|----------|------|
 | `931` | 192.168.9.31 | `/opt/hermes-studio-ekko` | `systemctl restart hermes-web-ui hermes-gateway` | — |
 | `935` | 192.168.9.35 | `/opt/hermes-studio` | `systemctl restart hermes-studio hermes-gateway` | — |
-| `936` | 192.168.9.36 | `/opt/hermes-studio-fork` | `systemctl restart hermes-web-ui` | 服务跑在 `ubuntu` 用户下；磁盘紧张（约剩 6.4G）；nvm 在 `/home/ubuntu/.nvm`（root 的 `$HOME` 没有）→ 构建必须 `export PATH=/home/ubuntu/.nvm/versions/node/v24.20.0/bin` + `chown -R ubuntu:ubuntu dist packages` |
+| `936` | 192.168.9.36 | `/opt/hermes-studio-fork` | `systemctl restart hermes-web-ui` | 服务跑在 `ubuntu` 用户下；磁盘紧张（约剩 6.4G）；nvm 在 `/home/ubuntu/.nvm`（root 的 `$HOME` 没有）→ 构建必须 `export PATH=/home/ubuntu/.nvm/versions/node/v24.20.0/bin` + `chown -R ubuntu:ubuntu dist packages`；**git 全局代理 2026-10-02 已补**（http/https.proxy=127.0.0.1:7890，此前缺失导致 pull 直连 GitHub 被墙间歇失败，现已稳定） |
 | `961` | 192.168.9.61 | `/opt/hermes-studio` | `systemctl restart hermes-studio hermes-gateway` | — |
 
 SSH：`ssh pve-vm-931` / `-935` / `-936` / `-961`（root，密钥 `~/.ssh/id_ed25519`）
