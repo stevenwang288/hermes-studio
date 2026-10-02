@@ -57,6 +57,13 @@
 |------|------|
 | `client/src/components/hermes/chat/ChatPanel.vue` | workspace-badge 去掉 `split("/").pop()`；`max-width: min(520px, 55vw)`；等宽字体 |
 
+### 4. 链接默认打开方式 + 内置浏览器错位修复（2026-10-02 新增）
+
+| 文件 | 改动 |
+|------|------|
+| `client/src/utils/desktop-browser.ts` | `DEFAULT_LINK_OPEN_TARGET` 从 `hermes-studio`（内置浏览器）改为 `default-browser`（系统默认浏览器）。点 URL 不再进内置浏览器（指纹/登录态/代理硬伤）；可到 设置→显示→链接打开方式 切回 |
+| `desktop/src/main/browser/browser-manager.ts` | `setViewport` 乘主窗口 `getZoomFactor()`：前端上报 CSS px rect，`setBounds` 需 DIP，字体缩放（zoom patch）后两者不等导致内嵌视图错位，现已换算 |
+
 ---
 
 ## 已放弃的功能（全部恢复官方，不再维护）
