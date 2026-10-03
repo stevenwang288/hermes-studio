@@ -469,6 +469,34 @@ export default {
   },
 
   // Sidebar
+  apiRelay: {
+    title: "بوابة API",
+    headline: "نماذج الذكاء الاصطناعي الرائدة عبر بوابة واحدة",
+    description: "APIKEY.FAN هي بوابة API الشريكة لـ Ekko Studio. توفر وصولًا موحدًا إلى Claude وChatGPT وGrok وGemini وZhipu وKimi وDeepSeek وMiniMax، وهي متوافقة مع واجهات API وحزم SDK الرسمية.",
+    zhipu: "Zhipu",
+    viewNow: "عرض الآن",
+    apiCompatible: "متوافقة مع واجهات API الرسمية",
+    usageTitle: "استخدام المفاتيح",
+    usageScope: "يشمل الملفات الشخصية المتاحة لك. تُدمج الخدمة والمفتاح نفسهما في بطاقة واحدة، وتُعرض المفاتيح المختلفة بشكل منفصل.",
+    loadFailed: "تعذر تحميل الاستخدام. حدّث لإعادة المحاولة.",
+    remaining: "الحصة المتبقية",
+    sources: "مصادر الإعداد",
+    keyActive: "المفتاح نشط",
+    keyInactive: "المفتاح غير نشط",
+    requests: "الطلبات",
+    spend: "التكلفة",
+    today: "اليوم",
+    total: "الإجمالي",
+    modelUsage: "الاستخدام حسب النموذج",
+    model: "النموذج",
+    errors: {
+      unauthorized: "فشلت مصادقة المفتاح. تحقق من المفتاح المُعدّ.",
+      timeout: "انتهت مهلة طلب الاستخدام. حدّث لإعادة المحاولة.",
+      unavailable: "خدمة الاستخدام غير متاحة. حدّث لإعادة المحاولة.",
+      invalid_response: "أعادت الخدمة استجابة استخدام بتنسيق غير معروف.",
+    },
+  },
+
   sidebar: {
     desktopUpdatePreparing: "جارٍ تجهيز التحديث",
     desktopUpdateStopping: "جارٍ إيقاف التنزيل…",
@@ -571,6 +599,7 @@ export default {
     ekkoDescription: 'يأتي Ekko ضمن Studio ولا يحتاج إلى تثبيت أو تحديث أو إزالة بشكل منفصل.',
     version: 'الإصدار',
     codingAgentDescription: 'يمكن لـ Studio تثبيت هذا الوكيل والتحقق من تحديثاته وإزالته.',
+    antigravityDescription: 'Install Antigravity CLI (agy) using the official guide and sign in from a terminal, then refresh. Global and scoped modes; installation, updates and removal are managed outside Studio.',
     cursorDescription: 'ثبّت Cursor CLI (`agent`) من https://cursor.com/install ثم حدّث. Studio لا يثبّته عبر npm.',
     cursorNoManagedConfig: 'بدء التشغيل لا يعيد كتابة ~/.cursor/mcp.json. الخوادم المُدارة تكون في نسخة التشغيل لهذه الجلسة.',
     updateToVersion: 'التحديث إلى {version}',
@@ -3586,7 +3615,7 @@ export default {
     cacheHitRate: 'معدل إصابة الذاكرة المؤقتة',
     modelBreakdown: 'التوزيع حسب النموذج',
     agentBreakdown: 'التوزيع حسب الوكيل',
-    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', ekkoAgent: 'Ekko', unknown: 'غير معروف' },
+    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', antigravity: 'Antigravity', ekkoAgent: 'Ekko', unknown: 'غير معروف' },
     dailyTrend: 'الاستخدام اليومي',
     date: 'التاريخ',
     tokens: 'التوكنات',
@@ -3705,6 +3734,14 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_7_29_1: 'استُعيد تنزيل الملفات من قوائم شجرة الملفات وأشرطة أدوات الفروق في مساحات عمل المحادثات والمحادثات الجماعية (#3268)',
+    new_0_7_29_2: 'أُصلح ظهور Antigravity باسم Ekko بالخطأ في إشعارات النشاط المباشر (#3272)',
+    new_0_7_28_1: 'أُضيف Antigravity CLI للمحادثات والمحادثات الجماعية وسير العمل في الوضعين العام والمعزول، مع الإعدادات الأصلية وMCP وإدارة المهارات (#3256)',
+    new_0_7_28_2: 'أُضيفت صفحة لخدمة الوساطة APIKEY.FAN تعرض الرصيد والاستخدام اليومي والإجمالي والتفاصيل حسب النموذج لمفاتيح API المُعدّة (#3257)',
+    new_0_7_28_3: 'أُصلحت حالة التحقق اليدوي من تحديثات Coding Agents واكتشاف إصدار CLI المُحدّث، مع حماية الجلسات النشطة (#3261)',
+    new_0_7_28_4: 'أُصلح الإنهاء المبكر والنص المفقود والردود المكررة في Claude، مع حفظ الناتج النهائي بالكامل (#3260, #3263)',
+    new_0_7_28_5: 'أُصلح الوصول إلى بيانات تسجيل الدخول الأصلية في الوضع العام لـ Antigravity على macOS وصُحّحت إرشادات تسجيل الدخول (#3266)',
+    new_0_7_28_6: 'حُدّثت أيقونة اتصالات الأجهزة إلى شاشة وهاتف لتوضيح مدخل الاتصالات في التنقل (#3262)',
     new_0_7_27_1: 'أُضيفت بطاقات استخدام محفوظة لكل جولة تعرض الرموز وإصابات التخزين المؤقت والتكاليف وسرعة الإخراج (#3241)',
     new_0_7_27_2: 'أُصلح إسناد استخدام Coding Agents وتكاليف كل استدعاء والإجماليات التراكمية، مع حفظ استخدام المهام المتوقفة وتحديث الإحصاءات المتأخرة (#3246)',
     new_0_7_27_3: 'أُضيفت بطاقات استخدام لكل جولة داخل فقاعات ردود المحادثات الجماعية، وتُستعاد عند تحميل السجل (#3248)',

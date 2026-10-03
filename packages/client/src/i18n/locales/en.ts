@@ -469,6 +469,34 @@ export default {
   },
 
   // Sidebar
+  apiRelay: {
+    title: "API Relay",
+    headline: "Leading AI models, one gateway",
+    description: "APIKEY.FAN is Ekko Studio’s partner API gateway, offering unified access to Claude, ChatGPT, Grok, Gemini, Zhipu, Kimi, DeepSeek, and MiniMax. It is compatible with official APIs and SDKs.",
+    zhipu: "Zhipu",
+    viewNow: "View now",
+    apiCompatible: "Official API compatibility",
+    usageTitle: "Key usage",
+    usageScope: "Includes your accessible profiles. The same service and key share one card; different keys are shown separately.",
+    loadFailed: "Unable to load usage. Refresh to try again.",
+    remaining: "Remaining quota",
+    sources: "Configured in",
+    keyActive: "Key active",
+    keyInactive: "Key inactive",
+    requests: "Requests",
+    spend: "Spend",
+    today: "Today",
+    total: "Total",
+    modelUsage: "Usage by model",
+    model: "Model",
+    errors: {
+      unauthorized: "Key authentication failed. Check the configured key.",
+      timeout: "The usage request timed out. Refresh to try again.",
+      unavailable: "The usage service is unavailable. Refresh to try again.",
+      invalid_response: "The service returned an unrecognized usage response.",
+    },
+  },
+
   sidebar: {
     desktopUpdatePreparing: "Preparing update",
     desktopUpdateStopping: "Stopping download…",
@@ -571,6 +599,7 @@ export default {
     ekkoDescription: 'Ekko ships with Studio and does not need separate installation, updates, or removal.',
     version: 'Version',
     codingAgentDescription: 'Studio can install, check for updates, and remove this Agent.',
+    antigravityDescription: 'Install Antigravity CLI (agy) using the official guide and sign in from a terminal, then refresh. Global and scoped modes; installation, updates and removal are managed outside Studio.',
     cursorDescription: 'Install the Cursor CLI (`agent`) from https://cursor.com/install, then refresh. Studio does not install it with npm.',
     cursorNoManagedConfig: 'Launch does not rewrite ~/.cursor/mcp.json. Managed servers live in this session\'s runtime copy.',
     updateToVersion: 'Update to {version}',
@@ -3605,7 +3634,7 @@ export default {
     cacheHitRate: 'Cache Hit Rate',
     modelBreakdown: 'Model Breakdown',
     agentBreakdown: 'Agent Breakdown',
-    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', ekkoAgent: 'Ekko', unknown: 'Unknown' },
+    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', antigravity: 'Antigravity', ekkoAgent: 'Ekko', unknown: 'Unknown' },
     dailyTrend: 'Daily Usage',
     date: 'Date',
     tokens: 'Tokens',
@@ -3724,6 +3753,14 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_7_29_1: 'Restored file downloads from workspace tree menus and diff toolbars in chats and group chats (#3268)',
+    new_0_7_29_2: 'Fixed Antigravity being mislabeled as Ekko in Live Activity notifications (#3272)',
+    new_0_7_28_1: 'Added Antigravity CLI for chat, group chats, and workflows in global and scoped modes, with native settings, MCP, and skills management (#3256)',
+    new_0_7_28_2: 'Added an APIKEY.FAN relay page with balance, daily and total usage, and model breakdowns for configured API keys (#3257)',
+    new_0_7_28_3: 'Fixed Coding Agent manual update status and detection of the updated CLI version, with protection for active sessions (#3261)',
+    new_0_7_28_4: 'Fixed early completion, missing text, and duplicate Claude replies, preserving the complete final output (#3260, #3263)',
+    new_0_7_28_5: 'Fixed native login credential access for Antigravity global mode on macOS and corrected the sign-in hint (#3266)',
+    new_0_7_28_6: 'Updated Device Connections navigation to a monitor and phone icon for a clearer connection entry point (#3262)',
     new_0_7_27_1: 'Added persisted per-turn usage cards showing tokens, cache hits, costs, and token speed (#3241)',
     new_0_7_27_2: 'Fixed Coding Agent usage attribution, per-call costs, and cumulative totals; retained interrupted-run usage and updated late accounting (#3246)',
     new_0_7_27_3: 'Added per-turn usage cards inside group chat reply bubbles, with usage restored when loading history (#3248)',
