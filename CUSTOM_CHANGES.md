@@ -69,6 +69,13 @@
 | `desktop/src/main/browser/browser-manager.ts` | `setViewport` 乘主窗口 `getZoomFactor()`：前端上报 CSS px rect，`setBounds` 需 DIP，字体缩放（zoom patch）后两者不等导致内嵌视图错位，现已换算 |
 | `desktop/src/main/index.ts` | `hermes-desktop:open-external-url` 优先探测并 `spawn` 系统 Chrome 打开链接（`findChromeExecutable`），Chrome 未装才回落 `shell.openExternal`。系统默认浏览器是夸克（QuarkHTM），Win11 无可靠命令行改默认（SetUserFTA 已商业化且 21H1+ 失效），故在 Hermes 层强制 Chrome |
 
+### 5. 微信扫码保存自动开 DM 策略（2026-10-03 新增）
+
+| 文件 | 改动 |
+|------|------|
+| `server/src/modules/hermes/controllers/weixin.ts` | `save()` 额外写入 `WEIXIN_DM_POLICY=open` + `WEIXIN_ALLOW_ALL_USERS=true`：Hermes 默认微信 DM 策略是 `pairing`（配对模式），Studio 页面扫码保存只写凭据不写策略，导致扫码用户被当陌生用户拒绝（日志 `Unauthorized user`）。扫码即代表用户主动授权，自动写 open 让新 bot 开箱即用。想收紧可自行改 .env |
+| 备注 | 官方 hermes runtime（0.20.6）doc 也要求配 `WEIXIN_DM_POLICY=open`；`getupdates` 空 buf 拉取会推进服务端游标，排查微信收不到消息时别手动拉队列（会消费掉 gateway 待拉消息） |
+
 ---
 
 ## 已放弃的功能（全部恢复官方，不再维护）

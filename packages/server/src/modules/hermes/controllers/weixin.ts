@@ -48,8 +48,12 @@ export async function save(ctx: any) {
   if (!account_id || !token) { ctx.status = 400; ctx.body = { error: 'Missing account_id or token' }; return }
   try {
     const profile = requestedProfile(ctx)
+    // 默认微信 DM 策略是 pairing(配对模式): 扫码用户会被当陌生用户拒绝(#57474 同源)。
+    // 扫码即代表用户主动授权, 自动写 open 策略让新 bot 开箱即用; 用户想收紧可自行改 .env。
     const entries: Record<string, string> = { WEIXIN_ACCOUNT_ID: account_id, WEIXIN_TOKEN: token }
     if (base_url) entries.WEIXIN_BASE_URL = base_url
+    entries.WEIXIN_DM_POLICY = 'open'
+    entries.WEIXIN_ALLOW_ALL_USERS = 'true'
     for (const [key, val] of Object.entries(entries)) {
       await saveEnvValueForProfile(profile, key, val)
     }
