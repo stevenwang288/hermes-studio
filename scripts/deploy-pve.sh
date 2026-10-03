@@ -6,7 +6,7 @@ SSH="pve-vm-$V"
 case $V in
   931) DIR=/opt/hermes-studio-ekko; SRV="hermes-web-ui hermes-gateway"; EXTRA="";;
   935) DIR=/opt/hermes-studio;     SRV="hermes-studio hermes-gateway"; EXTRA="";;
-  936) DIR=/opt/hermes-studio-fork; SRV="hermes-web-ui"; EXTRA="chown -R ubuntu:ubuntu $DIR/dist $DIR/packages 2>/dev/null || true";;
+  936) DIR=/opt/hermes-studio-fork; SRV="hermes-web-ui"; EXTRA="chown -R ubuntu:ubuntu $DIR/dist $DIR/packages 2>/dev/null || true"; NOBAK=1;;
   961) DIR=/opt/hermes-studio;     SRV="hermes-studio hermes-gateway"; EXTRA="";;
   *) echo "bad vm: $V"; exit 1;;
 esac
@@ -20,7 +20,11 @@ git checkout -- package-lock.json 2>/dev/null || true
 echo "--- 磁盘 ---"
 df -h /opt | tail -1
 echo "--- 备份 ---"
-cp -r $DIR ${DIR}.bak.\$(date +%Y%m%d%H%M%S)
+if [ -n "$NOBAK" ]; then
+  echo "936 磁盘紧, 跳过整目录备份(git sync 可回退)"
+else
+  cp -r $DIR ${DIR}.bak.\$(date +%Y%m%d%H%M%S)
+fi
 echo "--- git pull ---"
 git pull origin sync > /tmp/pull_deploy.log 2>&1 || { echo "GIT_PULL_FAILED: $(tail -1 /tmp/pull_deploy.log)"; echo "提示: PVE 偶发 TLS/HTTP2 抖动, 重跑脚本即可; 936 需用 ubuntu nvm 路径"; exit 1; }
 tail -3 /tmp/pull_deploy.log

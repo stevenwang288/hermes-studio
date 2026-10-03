@@ -12,7 +12,9 @@
 | `sync` | **0.7.29** | 唯一有效分支。= 上游 `main` 最新 + 4 项自研功能，已通过 `npm run build` + 桌面 `tsc --noEmit` 验证 |
 | `main` | 0.7.21 | 停用的旧基线，**勿用** |
 
-**最近一次合并（2026-10-03）**：上游 0.7.27 → 0.7.29 共 11 个提交（Antigravity CLI 全局集成、API relay 合作方页面+按 key 用量、设备连接图标区分、workspace 下载恢复、Claude text snapshot 修复）。**0 个文件冲突，干净 merge**；4 组自研（消息队列/字体缩放/路径显示/链接默认 Chrome）均确认保留。桌面版 0.7.29 exe 待云编译交付。
+**最近一次合并（2026-10-03）**：上游 0.7.27 → 0.7.29 共 11 个提交（Antigravity CLI 全局集成、API relay 合作方页面+按 key 用量、设备连接图标区分、workspace 下载恢复、Claude text snapshot 修复）。**0 个文件冲突，干净 merge**；4 组自研（消息队列/字体缩放/路径显示/链接默认 Chrome）均确认保留。桌面版 0.7.29 exe 已云编译交付。
+
+**2026-10-03 部署记录**：4 台 PVE（931/935/936/961）全部升级 **0.7.29**，`curl 8648` 探活 4/4 HTTP 200。踩坑：①**931 VM 部署后变 stopped**（PVE `qm status` 显示 stopped，`qm start` 拉起；且重启后 `dist/server/index.js` 是 0 字节——`npm run build | tail` 管道吞退出码、build 瞬态写失败没被发现，重跑 build 后 index.js 正常 12MB 才 HTTP 200）；②**936 磁盘 100% 满**（38G 盘剩 221M）：deploy-pve.sh 的整目录 `cp -r` 备份累计 4 个 1.6G 塞爆，且 936 root 的 `$HOME/.nvm` 不存在导致 node 落到 v22.23.2（需 `/home/ubuntu/.nvm/.../v24.20.0`）。已改 deploy-pve.sh：936 跳过备份（NOBAK=1，git sync 可回退），清理全部 .bak 后磁盘回 84%，用 redeploy-936-retry2.sh 以 v24.20.0 重跑通过。**以后 936 必须用 redeploy-936-retry2.sh，别用 deploy-pve.sh**；931 类机器部署后要验证 HTTP 200 而非只看脚本日志。
 
 **2026-10-02 合并**：上游 0.7.25 → 0.7.27 共 41 个提交（含 Cursor CLI 集成、浏览器自动化批次、JEV 评估、用量计费、桌面 UI 修复）。**2 个文件冲突，均已解决**：
 - `ChatPanel.vue`：workspace-badge（自研③路径显示）模板+样式保留，上游结构改动已并入
