@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
 import PageSidebar from "@/components/layout/PageSidebar.vue"
 import { usePageSidebarState } from "@/composables/usePageSidebar"
-import { usePageLoadingState } from '@/composables/usePageLoading'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import HeaderSidebarToggle from '@/components/layout/HeaderSidebarToggle.vue'
 import { GROUP_AGENT_OPTIONS } from "@/utils/agent-options"
@@ -124,8 +125,6 @@ watch(
 const showCreateModal = ref(false)
 const showCloneModal = ref(false)
 const showAddAgentDrawer = ref(false)
-const showGroupChatRefactorNotice = ref(false)
-const pageLoading = usePageLoadingState()
 const showManualRoomLinkModal = ref(false)
 const manualRoomLink = ref('')
 const manualRoomLinkInput = ref<HTMLInputElement | null>(null)
@@ -236,7 +235,6 @@ const toolPanelTransitionReady = ref(false)
 const activeWorkspacePanel = ref<'files' | 'terminal' | 'browser'>('files')
 const desktopBrowserAvailable = hasDesktopBrowserBridge()
 const workspacePanelMobile = ref(window.innerWidth <= 768)
-const GROUP_CHAT_REFACTOR_NOTICE_STORAGE_KEY = 'hermes.groupChat.refactorNotice.v1.acknowledged'
 const WORKSPACE_PANEL_MIN_WIDTH = 360
 const WORKSPACE_PANEL_DEFAULT_WIDTH = 560
 const WORKSPACE_PANEL_STORAGE_KEY = 'hermes.groupChat.workspacePanelWidth'
@@ -250,23 +248,18 @@ const profileOptions = computed(() =>
     profilesStore.profiles.map(p => ({ label: p.name, value: p.name }))
 )
 
-type GroupAgentType = 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity'
+type GroupAgentType = 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
 
 const groupAgentTypeDefinitions = GROUP_AGENT_OPTIONS
 
-const groupAgentTypeOptions = computed(() => groupAgentTypeDefinitions.map((option) => {
-    const disabled = !isAgentStatusAvailable(agentStatusSnapshot.value, option.value)
-    return {
-        ...option,
-        disabled,
-        label: disabled ? `${option.label} · ${t('codingAgents.notInstalled')}` : option.label,
-    }
-}))
+const groupAgentTypeOptions = computed(() => groupAgentTypeDefinitions.filter(option =>
+    isAgentStatusAvailable(agentStatusSnapshot.value, option.value)
+))
 
 const firstAvailableGroupAgentType = computed<GroupAgentType | null>(() =>
-    groupAgentTypeOptions.value.find(option => !option.disabled)?.value || null
+    groupAgentTypeOptions.value[0]?.value || null
 )
-const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity'].includes(selectedAgentType.value))
+const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(selectedAgentType.value))
 const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
 const agentModeOptions = computed(() => [
     { label: t('codingAgents.launchModeGlobal'), value: 'global' },
@@ -310,7 +303,7 @@ function getAgentModelGroups(profile: string) {
                         ? 'pi'
                         : selectedAgentType.value === 'grok'
                             ? 'grok'
-                            : (selectedAgentType.value === 'cursor' || selectedAgentType.value === 'antigravity')
+                            : (isGlobalOnlyCodingAgent(selectedAgentType.value) || (selectedAgentType.value === 'antigravity' || isNativeCodingAgent(selectedAgentType.value)))
                                 ? 'cursor'
                             : selectedAgentType.value === 'dsh' ? 'dsh' : selectedAgentType.value === 'opencode'
                                 ? 'opencode'
@@ -386,15 +379,18 @@ const pendingAgentPreset = computed(() =>
 
 const agentReasoningEffortOptions = computed(() => [
     { label: t('chat.reasoningEffort.options.default'), value: '' },
-    { label: t('chat.reasoningEffort.options.none'), value: 'none' },
-    { label: t('chat.reasoningEffort.options.minimal'), value: 'minimal' },
-    { label: t('chat.reasoningEffort.options.low'), value: 'low' },
-    { label: t('chat.reasoningEffort.options.medium'), value: 'medium' },
-    { label: t('chat.reasoningEffort.options.high'), value: 'high' },
-    { label: t('chat.reasoningEffort.options.xhigh'), value: 'xhigh' },
-    { label: t('chat.reasoningEffort.options.max'), value: 'max' },
+    ...modelReasoningEfforts(
+      getAgentModelGroups(selectedProfile.value || ''),
+      selectedAgentProvider.value,
+      selectedAgentModel.value,
+    ).map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
 ])
 
+watch([agentReasoningEffortOptions, selectedAgentReasoningEffort], ([options, effort]) => {
+  if (!usesGlobalAgentMode.value && effort && !options.some(option => option.value === effort)) {
+    selectedAgentReasoningEffort.value = ''
+  }
+})
 const summaryModelGroups = computed(() =>
     (appStore.profileModelGroups.find(entry => entry.profile === summaryConfig.value.summaryProfile)?.groups || [])
         .filter(group => group.provider !== 'moa' && canScopedCodingAgentUseProvider('ekko-agent', group.provider))
@@ -958,16 +954,6 @@ function handleGroupAttachmentPreviewRequest(event: Event): void {
     }).catch(error => {
         message.error(error instanceof Error ? error.message : t('files.previewFailed'))
     })
-}
-
-
-function acknowledgeGroupChatRefactorNotice() {
-    try {
-        window.localStorage.setItem(GROUP_CHAT_REFACTOR_NOTICE_STORAGE_KEY, '1')
-    } catch {
-        // The notice can still be dismissed when persistent browser storage is unavailable.
-    }
-    showGroupChatRefactorNotice.value = false
 }
 
 const remoteRooms = computed(() => buildRemoteGroupChatRooms(
@@ -1606,13 +1592,6 @@ function handleEditAgent(agent: RoomAgent) {
 
 onMounted(() => {
     if (!props.standalone) void refreshAgentAvailability()
-    if (!props.standalone) {
-        try {
-            showGroupChatRefactorNotice.value = window.localStorage.getItem(GROUP_CHAT_REFACTOR_NOTICE_STORAGE_KEY) !== '1'
-        } catch {
-            showGroupChatRefactorNotice.value = true
-        }
-    }
     window.addEventListener('hermes:preview-workspace-file', handleWorkspaceFilePreviewRequest)
     window.addEventListener('hermes:preview-group-attachment', handleGroupAttachmentPreviewRequest)
     window.addEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, handleOpenDesktopBrowserPanelRequest)
@@ -3205,25 +3184,6 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                 </template>
             </NModal>
             <NModal
-                v-model:show="showGroupChatRefactorNotice"
-                v-if="!pageLoading"
-                preset="dialog"
-                :title="t('groupChat.refactorNoticeTitle')"
-                :mask-closable="false"
-                :close-on-esc="false"
-                :closable="false"
-                style="width: 480px; max-width: 92vw"
-            >
-                <p class="group-chat-refactor-notice">
-                    {{ t('groupChat.refactorNoticeMessage') }}
-                </p>
-                <template #action>
-                    <NButton type="primary" @click="acknowledgeGroupChatRefactorNotice">
-                        {{ t('common.confirm') }}
-                    </NButton>
-                </template>
-            </NModal>
-            <NModal
                 v-model:show="showWorkspaceModal"
                 preset="dialog"
                 :title="t('chat.setWorkspaceTitle')"
@@ -3593,11 +3553,6 @@ export default defineComponent({ components: { CreateRoomForm } })
     flex: 1;
     min-height: 0;
     display: flex;
-}
-
-.group-chat-refactor-notice {
-    margin: 0;
-    line-height: 1.7;
 }
 
 @media (max-width: $breakpoint-mobile) {

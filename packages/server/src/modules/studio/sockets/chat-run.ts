@@ -1,5 +1,7 @@
+import { isNativeCodingAgent } from '../contracts/agents/native-coding-agents'
 import { withRunUsage, onRunUsageUpdated } from '../repositories/run-usage-store'
 import { agentFamilyForRuntime, isAgentRuntime } from '../contracts/agents/runtime'
+import { isBuiltinEkkoAgent, normalizeEkkoRunData } from '../contracts/history-source'
 import { recordSessionUploadAttachments } from '../services/files/session-uploads'
 import { authenticateSessionShare, socketShareToken, assertShareProfile, sessionShareExecutionUser, refreshSessionShare, type SessionShareAccess } from '../services/session-shares/access'
 import { bindSessionShareSocket } from '../services/session-shares/socket-access'
@@ -51,6 +53,7 @@ import {
 import { handleBridgeRun, resumeBridgeRun } from '../services/chat-run/handle-bridge-run'
 import { handleCodingAgentRun } from '../services/chat-run/handle-coding-agent-run'
 import { handleEkkoAgentRun, type EkkoAgentRunSocketData } from '../services/chat-run/handle-ekko-agent-run'
+import { handleEkkoSessionCommand, parseEkkoRunCommand } from '../services/chat-run/ekko-session-command'
 import { handleAbort } from '../services/chat-run/abort'
 import { getOrCreateSession } from '../services/chat-run/compression'
 import { loadSessionStateFromDb, resolveRunSource } from '../services/chat-run/load-state'
@@ -187,11 +190,11 @@ function isHermesWorkerBackedSession(session?: { source?: string | null; agent?:
   if (!source || source === 'cli' || source === 'api_server') return true
   if (source === 'workflow' || source === 'group_chat') {
     const agent = String(session?.agent || '').trim()
-    return agent !== 'claude' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && (agent !== 'cursor' && agent !== 'antigravity') && (agent !== 'opencode' && agent !== 'dsh') && agent !== 'ekko-agent' && !session?.agent_session_id
+    return agent !== 'claude' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && (agent !== 'cursor' && (agent !== 'antigravity' && !isNativeCodingAgent(agent))) && (agent !== 'opencode' && agent !== 'dsh') && agent !== 'ekko-agent' && !session?.agent_session_id
   }
   if (source !== 'global_agent') return false
   const agent = String(session?.agent || '').trim()
-  return agent !== 'claude' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && (agent !== 'cursor' && agent !== 'antigravity') && (agent !== 'opencode' && agent !== 'dsh') && agent !== 'ekko-agent' && !session?.agent_session_id
+  return agent !== 'claude' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && (agent !== 'cursor' && (agent !== 'antigravity' && !isNativeCodingAgent(agent))) && (agent !== 'opencode' && agent !== 'dsh') && agent !== 'ekko-agent' && !session?.agent_session_id
 }
 
 function isBridgeRunSource(source?: string): boolean {
@@ -263,8 +266,8 @@ export async function ensureBridgeReadyForChatRun(): Promise<ChatRunBridgeReadin
   }
 }
 
-function isCodingAgentExecution(source: string | undefined, data?: { coding_agent_id?: string; agent_id?: string }): boolean {
-  return source === 'coding_agent'
+function isProviderAgentExecution(source: string | undefined, data?: { coding_agent_id?: string; agent_id?: string }): boolean {
+  return isEkkoAgentExecution(data) || source === 'builtin_agent' || source === 'coding_agent'
     || ((source === 'workflow' || source === 'group_chat') && Boolean(data?.coding_agent_id || data?.agent_id))
 }
 
@@ -275,7 +278,7 @@ function resolveSessionCategoryId(value: unknown): number | null {
 }
 
 function isEkkoAgentExecution(data?: { coding_agent_id?: string; agent_id?: string }): boolean {
-  return data?.coding_agent_id === 'ekko-agent' || data?.agent_id === 'ekko-agent'
+  return isBuiltinEkkoAgent(data?.coding_agent_id) || isBuiltinEkkoAgent(data?.agent_id)
 }
 
 function webhookAgentForRun(data?: { coding_agent_id?: string; agent_id?: string }): ChatRunWebhookAgent {
@@ -284,7 +287,7 @@ function webhookAgentForRun(data?: { coding_agent_id?: string; agent_id?: string
   if (agent === 'codex') return 'codex'
   if (agent === 'pi') return 'pi'
   if (agent === 'grok') return 'grok'
-  if (agent === 'antigravity') return 'antigravity'
+  if ((agent === 'antigravity' || isNativeCodingAgent(agent))) return 'antigravity'
   if (agent === 'cursor') return 'cursor'
   if (agent === 'dsh') return 'dsh'
   if (agent === 'opencode') return 'opencode'
@@ -943,6 +946,7 @@ export class ChatRunSocket {
       let runProfile: string
       try {
         runProfile = resolveRunProfile(data.session_id, data.profile)
+        normalizeEkkoRunData(data, data.session_id ? getSession(data.session_id) : undefined)
         if (!shared && data.session_id && Array.isArray(data.input)) {
           // New chats carry a client-generated id; the runtime persists them on the first run.
           if (getSession(data.session_id)) requireSocketSessionAccess(data.session_id)
@@ -964,8 +968,18 @@ export class ChatRunSocket {
       if (data.session_id) {
         const state = getOrCreateSession(this.sessionMap, data.session_id)
         const source = resolveRunSource(data.source, data.session_id)
+        const storedSession = getSession(data.session_id)
+        const ekkoExecution = isEkkoAgentExecution(data)
+        if (ekkoExecution) {
+          data.agent_id = 'ekko-agent'
+          const ekkoCommand = parseEkkoRunCommand(data, storedSession?.source)
+          if (ekkoCommand) {
+            await handleEkkoSessionCommand(this.nsp, socket, data, ekkoCommand, runProfile, this.sessionMap, this.dequeueNextQueuedRun.bind(this))
+            return
+          }
+        }
         const command = parseSessionCommand(data.input)
-        if (command && (isBridgeRunSource(source) || command.name === 'branch')) {
+        if (command && ((!ekkoExecution && isBridgeRunSource(source)) || command.name === 'branch')) {
           try {
             const handled = await handleSessionCommand(data.session_id, command, {
               nsp: this.nsp,
@@ -993,7 +1007,7 @@ export class ChatRunSocket {
           }
           return
         }
-        if (isCodingAgentExecution(source, data)) {
+        if (!ekkoExecution && isProviderAgentExecution(source, data)) {
           if (typeof data.input === 'string') {
             const codingAgentCommand = parseCodingAgentSessionCommand(data.input)
             if (codingAgentCommand) {
@@ -1120,7 +1134,7 @@ export class ChatRunSocket {
           return
         }
         state.events = []
-        state.isWorking = !isCodingAgentExecution(source, data)
+        state.isWorking = !isProviderAgentExecution(source, data)
         state.runStartedAt = Date.now()
         state.profile = runProfile
         state.source = source
@@ -1705,6 +1719,7 @@ export class ChatRunSocket {
     backgroundContinuationContext?: BackgroundContinuationContext,
     pushTargetId?: string,
   ) {
+    normalizeEkkoRunData(data, data.session_id ? getSession(data.session_id) : undefined)
     const source = resolveRunSource(data.source, data.session_id)
     const surface = data.session_source || source
     if (data.session_id) getOrCreateSession(this.sessionMap, data.session_id).pushTargetId = pushTargetId
@@ -1719,7 +1734,7 @@ export class ChatRunSocket {
       : undefined
     const mcpCapabilities = ekkoMcpServers
       ? studioMcpCapabilities(ekkoMcpServers)
-      : isCodingAgentExecution(source, data)
+      : isProviderAgentExecution(source, data)
         ? studioMcpCapabilities(getChatCodingAgentMcpServers(codingAgentId(data), profile))
         : await hermesStudioMcpCapabilities(profile)
     const mobileTarget = data.session_id ? this.mobileRunTargets.get(data.session_id) : undefined
@@ -1747,9 +1762,9 @@ export class ChatRunSocket {
       state.webhookWorkflowId = data.workflow_id
       state.webhookWorkflowNodeId = data.workflow_node_id
     }
-    if (data.session_id && isBridgeRunSource(source) && isSessionCommand(data.input) && data.allow_command_passthrough !== true) return
+    if (data.session_id && !isEkkoAgentExecution(data) && isBridgeRunSource(source) && isSessionCommand(data.input) && data.allow_command_passthrough !== true) return
 
-    if (!isCodingAgentExecution(source, data)) {
+    if (!isProviderAgentExecution(source, data)) {
       const bridgeReady = await ensureBridgeReadyForChatRun()
       if (!bridgeReady.ok) {
         let shouldDequeueNext = false
@@ -2278,17 +2293,25 @@ export class ChatRunSocket {
   }
 
   private async reattachBridgeRun(socket: Socket, sid: string, state: SessionState) {
-    if (state.runId && state.isWorking) return
     const session = getSession(sid)
     const source = state.source || session?.source
     if (!isHermesWorkerBackedSession({ source, agent: session?.agent, agent_session_id: session?.agent_session_id })) return
     const profile = session?.profile || currentProfileFromSocket(socket)
+    const previousRunId = state.runId
+    const previousRunMarker = state.activeRunMarker
     let pollKey: string | undefined
     try {
       const status = await this.bridge.statusIfLoaded(sid, profile, { timeoutMs: 1000 }) as Record<string, unknown>
+      if (this.sessionMap.get(sid) !== state || state.runId !== previousRunId || state.activeRunMarker !== previousRunMarker) return
+      // A live consumer may be finishing accounting after Hermes has already
+      // stopped. Let it deliver the terminal event; do not attach a second poll.
+      if (state.bridgeRunPollMarker && state.bridgeRunPollMarker === state.activeRunMarker) return
       const running = status.running === true
-      const runId = typeof status.current_run_id === 'string' ? status.current_run_id : ''
-      if (!running || !runId) return
+      const currentRunId = typeof status.current_run_id === 'string' ? status.current_run_id : ''
+      // Recover terminal output as well as running output when a cached run has
+      // lost its consumer. Unknown run ids become run.failed in resumeBridgeRun.
+      const runId = running && currentRunId ? currentRunId : state.isWorking ? previousRunId : undefined
+      if (!runId) return
       pollKey = `${sid}:${runId}`
       if (this.bridgeResumePolls.has(pollKey)) return
       this.bridgeResumePolls.add(pollKey)
@@ -2346,6 +2369,7 @@ export class ChatRunSocket {
       logger.info('[chat-run-socket] reattached running bridge run %s for session %s', runId, sid)
     } catch (err) {
       if (pollKey) this.bridgeResumePolls.delete(pollKey)
+      if (this.sessionMap.get(sid) !== state || state.runId !== previousRunId || state.activeRunMarker !== previousRunMarker) return
       if (isBridgeStatusLookupTimeout(err)) {
         logger.debug(err, '[chat-run-socket] bridge status lookup timed out while resuming session %s', sid)
         return
@@ -2387,11 +2411,11 @@ export class ChatRunSocket {
   private queueInsertionRuntime(sessionId: string, state: SessionState): QueueInsertionRuntime | null {
     const storedAgent = String(getSession(sessionId)?.agent || '').trim()
     const activeAgent = state.webhookAgent
-      || (storedAgent === 'ekko-agent' ? 'ekko' : storedAgent === 'claude' ? 'claude-code' : storedAgent === 'codex' ? 'codex' : storedAgent === 'pi' ? 'pi' : storedAgent === 'grok' ? 'grok' : (storedAgent === 'cursor' || storedAgent === 'antigravity') ? storedAgent : storedAgent === 'dsh' ? 'dsh' : storedAgent === 'opencode' ? 'opencode' : 'bridge')
+      || (storedAgent === 'ekko-agent' ? 'ekko' : storedAgent === 'claude' ? 'claude-code' : storedAgent === 'codex' ? 'codex' : storedAgent === 'pi' ? 'pi' : storedAgent === 'grok' ? 'grok' : (storedAgent === 'cursor' || (storedAgent === 'antigravity' || isNativeCodingAgent(storedAgent))) ? storedAgent : storedAgent === 'dsh' ? 'dsh' : storedAgent === 'opencode' ? 'opencode' : 'bridge')
     if (activeAgent === 'ekko') return 'ekko'
-    if (activeAgent === 'claude-code' || activeAgent === 'codex' || activeAgent === 'pi' || activeAgent === 'grok' || (activeAgent === 'cursor' || activeAgent === 'antigravity') || (activeAgent === 'opencode' || activeAgent === 'dsh')) return activeAgent
+    if (activeAgent === 'claude-code' || activeAgent === 'codex' || activeAgent === 'pi' || activeAgent === 'grok' || (activeAgent === 'cursor' || (activeAgent === 'antigravity' || isNativeCodingAgent(activeAgent))) || (activeAgent === 'opencode' || activeAgent === 'dsh')) return activeAgent
     if (activeAgent !== 'bridge') return null
-    if (state.source === 'coding_agent') return null
+    if (state.source === 'coding_agent' || state.source === 'builtin_agent') return null
     return state.source === 'cli' || state.source === 'global_agent' ? 'hermes' : null
   }
 
@@ -2475,7 +2499,7 @@ export class ChatRunSocket {
     if (!state || !control || control.generation !== generation || control.phase !== 'requesting' || !control.runId) return
 
     try {
-      if (control.runtime === 'claude-code' || control.runtime === 'codex' || control.runtime === 'pi' || control.runtime === 'grok' || (control.runtime === 'cursor' || control.runtime === 'antigravity') || (control.runtime === 'opencode' || control.runtime === 'dsh')) {
+      if (control.runtime === 'claude-code' || control.runtime === 'codex' || control.runtime === 'pi' || control.runtime === 'grok' || (control.runtime === 'cursor' || (control.runtime === 'antigravity' || isNativeCodingAgent(control.runtime))) || (control.runtime === 'opencode' || control.runtime === 'dsh')) {
         control.phase = 'stopping_current_turn'
         this.emitQueueInsertionUpdate(sessionId, control)
         const result = await codingAgentRunManager.interruptForQueueInsertion(sessionId, control.runId)
@@ -2704,7 +2728,7 @@ export class ChatRunSocket {
     const pushTargetId = options.pushRoot ? getRunPushTarget(options.pushRoot)?.id : undefined
     const state = getOrCreateSession(this.sessionMap, sessionId)
     state.events = []
-    state.isWorking = !isCodingAgentExecution(source, data)
+    state.isWorking = !isProviderAgentExecution(source, data)
     state.runStartedAt = Date.now()
     state.profile = profile
     state.source = source
@@ -2930,7 +2954,7 @@ export class ChatRunSocket {
       sessionId,
       profile,
       source: state?.source || session?.source || 'coding_agent',
-      agent: state?.webhookAgent || (storedAgent === 'codex' ? 'codex' : storedAgent === 'pi' ? 'pi' : storedAgent === 'grok' ? 'grok' : (storedAgent === 'cursor' || storedAgent === 'antigravity') ? storedAgent : storedAgent === 'dsh' ? 'dsh' : storedAgent === 'opencode' ? 'opencode' : storedAgent === 'ekko-agent' ? 'ekko' : 'claude-code'),
+      agent: state?.webhookAgent || (storedAgent === 'codex' ? 'codex' : storedAgent === 'pi' ? 'pi' : storedAgent === 'grok' ? 'grok' : (storedAgent === 'cursor' || (storedAgent === 'antigravity' || isNativeCodingAgent(storedAgent))) ? storedAgent : storedAgent === 'dsh' ? 'dsh' : storedAgent === 'opencode' ? 'opencode' : storedAgent === 'ekko-agent' ? 'ekko' : 'claude-code'),
       payload: tagged,
       roomId: state?.webhookRoomId,
       workflowId: state?.webhookWorkflowId,
@@ -3210,7 +3234,7 @@ export class ChatRunSocket {
       sessionId,
       profile,
       source: state?.source || session?.source || 'chat',
-      agent: state?.webhookAgent || (storedAgent === 'codex' ? 'codex' : storedAgent === 'pi' ? 'pi' : storedAgent === 'grok' ? 'grok' : (storedAgent === 'cursor' || storedAgent === 'antigravity') ? storedAgent : storedAgent === 'dsh' ? 'dsh' : storedAgent === 'opencode' ? 'opencode' : storedAgent === 'ekko-agent' ? 'ekko' : 'bridge'),
+      agent: state?.webhookAgent || (storedAgent === 'codex' ? 'codex' : storedAgent === 'pi' ? 'pi' : storedAgent === 'grok' ? 'grok' : (storedAgent === 'cursor' || (storedAgent === 'antigravity' || isNativeCodingAgent(storedAgent))) ? storedAgent : storedAgent === 'dsh' ? 'dsh' : storedAgent === 'opencode' ? 'opencode' : storedAgent === 'ekko-agent' ? 'ekko' : 'bridge'),
       payload: tagged,
       roomId: state?.webhookRoomId,
       workflowId: state?.webhookWorkflowId,

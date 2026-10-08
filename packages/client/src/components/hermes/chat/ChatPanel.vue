@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
 import PageSidebar from "@/components/layout/PageSidebar.vue"
 import { usePageSidebarState } from "@/composables/usePageSidebar"
 import { usePageLoadingTask } from '@/composables/usePageLoading'
@@ -20,8 +21,8 @@ import {
   type SessionCategory,
 } from "@/api/studio/sessions";
 import type { AvailableModelGroup } from "@/api/hermes/system";
-import { fetchCodingAgentsStatus, inferCodingAgentApiMode, normalizeCodingAgentApiMode, type ChatCodingAgentId, type CodingAgentApiMode, type CodingAgentId } from "@/api/coding-agents";
-import { agentInstallationState, fetchAgentAvailabilitySnapshot } from "@/api/agent-status";
+import { inferCodingAgentApiMode, normalizeCodingAgentApiMode, type ChatCodingAgentId, type CodingAgentApiMode, type CodingAgentId } from "@/api/coding-agents";
+import { agentInstallationState, fetchAgentAvailabilitySnapshot, type AgentAvailabilitySnapshot } from "@/api/agent-status";
 import { useChatStore, type Session } from "@/stores/hermes/chat";
 import { useAppStore } from "@/stores/hermes/app";
 import { useProfilesStore } from "@/stores/hermes/profiles";
@@ -69,7 +70,7 @@ import PageSidebarFooter from "@/components/layout/PageSidebarFooter.vue";
 import { isStoredSuperAdmin } from "@/api/client";
 import { useDefaultWorkspace } from "@/composables/useDefaultWorkspace";
 import { useCollapsedProviderGroups } from "@/composables/useCollapsedProviderGroups";
-import { canScopedCodingAgentUseProvider, usesServerManagedProviderAuth, isKeylessModelProvider, openCodeFreeApiMode } from "@/utils/codingAgentProviders";
+import { canScopedCodingAgentUseProvider, usesServerManagedProviderAuth } from "@/utils/codingAgentProviders";
 import { OPEN_SUBAGENT_STREAM_EVENT, type OpenSubagentStreamDetail } from "@/utils/hermes/subagent-stream";
 import { desktopBridge, hasDesktopBrowserBridge } from "@/utils/desktop-bridge";
 import { OPEN_DESKTOP_BROWSER_PANEL_EVENT } from "@/utils/desktop-browser";
@@ -540,6 +541,7 @@ watch(
 );
 
 onUnmounted(() => {
+  newChatOptionsLoadSequence++;
 
   window.removeEventListener("hermes:preview-workspace-file", handleWorkspaceFilePreviewRequest);
   window.removeEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, handleOpenDesktopBrowserPanelRequest);
@@ -817,7 +819,17 @@ const headerTitle = computed(() =>
 );
 
 const showNewChatModal = ref(false);
-const newChatAgent = ref<"hermes" | ChatCodingAgentId>("hermes");
+const NEW_CHAT_AGENT_STORAGE_KEY = "hermes_new_chat_agent_v1";
+function loadNewChatAgent(): "hermes" | ChatCodingAgentId {
+  try {
+    const saved = localStorage.getItem(NEW_CHAT_AGENT_STORAGE_KEY);
+    return AGENT_OPTIONS.find(option => option.value === saved)?.value || AGENT_OPTIONS[0].value;
+  } catch {
+    return AGENT_OPTIONS[0].value;
+  }
+}
+let preferredNewChatAgent = loadNewChatAgent();
+const newChatAgent = ref<"hermes" | ChatCodingAgentId>(preferredNewChatAgent);
 const newChatAgentMode = ref<"global" | "scoped">("scoped");
 const newChatProfile = ref<string>("default");
 const newChatProvider = ref<string>("");
@@ -833,6 +845,9 @@ const newChatCategoryId = ref<number | null>(null);
 const newChatCategoryCreating = ref(false);
 const newChatCategorySelectRevision = ref(0);
 const newChatLoading = ref(false);
+const newChatAgentLoading = ref(false);
+const newChatModelsLoading = ref(false);
+let newChatOptionsLoadSequence = 0;
 
 const newChatCategoryOptions = computed(() => [
   { label: t("chat.uncategorized"), value: 0 },
@@ -882,30 +897,17 @@ async function handleNewChatCategoryChange(value: string | number | null) {
   }
 }
 
-// Default workspace feature (multiple defaults supported)
-const defaultWorkspaces = ref<string[]>([]);
-const recentWorkspaces = ref<Array<{ path: string; lastUsed: number; useCount: number }>>([]);
-let workspaceComposable: ReturnType<typeof useDefaultWorkspace> | null = null;
+// Directory shortcuts are stored by the authenticated Studio account.
+const workspaceComposable = useDefaultWorkspace();
+const { defaultWorkspaces, recentWorkspaces } = workspaceComposable;
 
-function initWorkspaceComposable(profile: string) {
-  workspaceComposable = useDefaultWorkspace(profile);
-  defaultWorkspaces.value = workspaceComposable.loadDefaultWorkspaces();
-  recentWorkspaces.value = workspaceComposable.loadRecentWorkspaces();
+async function initWorkspaceComposable() {
+  try { await workspaceComposable.init(); }
+  catch { message.error(t("chat.workspaceSetFailed")); }
 }
 
-function handleToggleDefaultWorkspace() {
-  if (!workspaceComposable) return;
-  const currentPath = newChatWorkspace.value;
-  if (!currentPath) return;
-  
-  const isDefault = defaultWorkspaces.value.includes(currentPath);
-  if (isDefault) {
-    workspaceComposable.removeDefaultWorkspace(currentPath);
-    defaultWorkspaces.value = defaultWorkspaces.value.filter(p => p !== currentPath);
-  } else {
-    workspaceComposable.addDefaultWorkspace(currentPath);
-    defaultWorkspaces.value = [...defaultWorkspaces.value, currentPath];
-  }
+async function handleToggleDefaultWorkspace() {
+  if (newChatWorkspace.value) await handleTogglePinRecent(newChatWorkspace.value);
 }
 
 function handleSelectRecentWorkspace(path: string) {
@@ -917,20 +919,14 @@ function handleSelectDefaultWorkspace(path: string) {
   showDefaultWorkspaceMenu.value = false;
 }
 
-function handleTogglePinRecent(path: string) {
-  if (!workspaceComposable) return;
-  const isDefault = defaultWorkspaces.value.includes(path);
-  if (isDefault) {
-    workspaceComposable.removeDefaultWorkspace(path);
-    defaultWorkspaces.value = defaultWorkspaces.value.filter(p => p !== path);
-  } else {
-    workspaceComposable.addDefaultWorkspace(path);
-    defaultWorkspaces.value = [...defaultWorkspaces.value, path];
-  }
+async function handleTogglePinRecent(path: string) {
+  try {
+    await workspaceComposable.toggleDefaultWorkspace(path);
+  } catch { message.error(t("chat.workspaceSetFailed")); }
 }
 
 const isCurrentWorkspaceDefault = computed(() => {
-  return Boolean(newChatWorkspace.value && defaultWorkspaces.value.includes(newChatWorkspace.value));
+  return Boolean(newChatWorkspace.value && workspaceComposable.isDefaultWorkspace(newChatWorkspace.value));
 });
 
 const showDefaultWorkspaceMenu = ref(false);
@@ -975,7 +971,10 @@ const hiddenDefaultWorkspaces = computed(() => {
   return defaultWorkspaces.value.filter(ws => !visible.has(ws));
 });
 
-const newChatAgentOptions = computed(() => AGENT_OPTIONS.map(option => ({ ...option })));
+const newChatAgentAvailability = ref<AgentAvailabilitySnapshot | null>(null);
+const newChatAgentOptions = computed(() => AGENT_OPTIONS.filter(option =>
+  agentInstallationState(newChatAgentAvailability.value, option.value) === "installed",
+));
 
 const newChatApiModeOptions = computed(() => [
   { label: t("codingAgents.protocolOpenAiChat"), value: "chat_completions" },
@@ -993,7 +992,7 @@ function effectiveNewChatMode(
   requestedMode: typeof newChatAgentMode.value,
 ) {
   if (agent === "ekko-agent") return "scoped";
-  if (agent === "cursor") return "global";
+  if (isGlobalOnlyCodingAgent(agent)) return "global";
   return requestedMode;
 }
 
@@ -1093,7 +1092,7 @@ const selectedNewChatProviderGroup = computed(() =>
 );
 
 const isNewChatCodingAgent = computed(() => newChatAgent.value !== "hermes");
-const isNewChatExternalCodingAgent = computed(() => newChatAgent.value === "claude-code" || newChatAgent.value === "codex" || newChatAgent.value === "pi" || newChatAgent.value === "grok" || newChatAgent.value === "antigravity" || newChatAgent.value === "cursor" || (newChatAgent.value === "opencode" || newChatAgent.value === "dsh"));
+const isNewChatExternalCodingAgent = computed(() => newChatAgent.value === "claude-code" || newChatAgent.value === "codex" || newChatAgent.value === "pi" || newChatAgent.value === "grok" || (newChatAgent.value === "antigravity" || isNativeCodingAgent(newChatAgent.value)) || isGlobalOnlyCodingAgent(newChatAgent.value) || (newChatAgent.value === "opencode" || newChatAgent.value === "dsh"));
 const effectiveNewChatAgentMode = computed(() =>
   effectiveNewChatMode(newChatAgent.value, newChatAgentMode.value),
 );
@@ -1107,19 +1106,19 @@ const newChatNeedsBaseUrl = computed(() =>
 const newChatUsesServerAuth = computed(() =>
   usesServerManagedProviderAuth(newChatAgent.value as ChatCodingAgentId, selectedNewChatProviderGroup.value?.provider),
 );
-const newChatUsesKeylessProvider = computed(() => isKeylessModelProvider(newChatProvider.value));
 const newChatNeedsApiKey = computed(() =>
   isNewChatCodingAgent.value &&
   effectiveNewChatAgentMode.value === "scoped" &&
   !newChatUsesServerAuth.value &&
-  !newChatUsesKeylessProvider.value &&
   !selectedNewChatProviderGroup.value?.api_key,
 );
 const canConfirmNewChat = computed(() => {
   if (newChatCategoryCreating.value || newChatLoading.value) return false;
+  if (!newChatAgentOptions.value.some(option => option.value === newChatAgent.value)) return false;
   if (newChatAgent.value === "dsh" && (!newChatAgentPreset.value || !newChatPresetReady.value)) return false;
-  if (!newChatProfile.value) return false;
+  if (!profilesStore.profiles.some(profile => profile.name === newChatProfile.value)) return false;
   if (!newChatUsesProviderModel.value) return true;
+  if (newChatModelsLoading.value) return false;
   if (!newChatProvider.value || !newChatModel.value) return false;
   if (!isNewChatCodingAgent.value) return true;
   if (isNewChatCodingAgent.value && effectiveNewChatAgentMode.value === "scoped" && !newChatApiMode.value) return false;
@@ -1129,7 +1128,6 @@ const canConfirmNewChat = computed(() => {
 });
 
 function defaultNewChatApiMode(group?: AvailableModelGroup): CodingAgentApiMode {
-  if (newChatUsesKeylessProvider.value) return openCodeFreeApiMode(newChatModel.value);
   const providerKey = String(group?.provider || newChatProvider.value || "").toLowerCase();
   const baseUrl = String(group?.base_url || newChatBaseUrl.value || "").toLowerCase();
   return normalizeCodingAgentApiMode(
@@ -1141,10 +1139,6 @@ function defaultNewChatApiMode(group?: AvailableModelGroup): CodingAgentApiMode 
 function syncNewChatApiMode() {
   newChatApiMode.value = defaultNewChatApiMode(selectedNewChatProviderGroup.value);
 }
-
-watch(newChatModel, () => {
-  if (newChatUsesKeylessProvider.value) syncNewChatApiMode();
-});
 
 function syncNewChatModelSelection() {
   const defaults = getDefaultModelForProfile(newChatProfile.value);
@@ -1198,75 +1192,89 @@ watch(
   () => [newChatAgent.value, newChatAgentMode.value, newChatProfile.value],
   () => {
     ensureNewChatProviderSelection();
-    // Reload workspace data when profile changes
-    if (newChatProfile.value) {
-      initWorkspaceComposable(newChatProfile.value);
-    }
   },
 );
 
-let newChatCatalogPoll: ReturnType<typeof setInterval> | undefined;
-let refreshingNewChatCatalog = false;
-watch(showNewChatModal, (visible) => {
-  if (newChatCatalogPoll) clearInterval(newChatCatalogPoll);
-  newChatCatalogPoll = undefined;
-  if (!visible) return;
-  newChatCatalogPoll = setInterval(async () => {
-    const free = newChatModelGroups.value.find(group => group.provider === "opencode-free");
-    if (refreshingNewChatCatalog || !free || !["loading", "error"].includes(free.catalog_status || "")) return;
-    refreshingNewChatCatalog = true;
-    try {
-      await appStore.reloadModels({ preserveSelection: true });
-      if (!showNewChatModal.value) return;
-      const current = selectedNewChatProviderGroup.value;
-      if (current && !newChatModel.value) {
-        newChatModel.value = current.models[0] || "";
-        syncNewChatApiMode();
-      } else if (!newChatProvider.value) {
-        ensureNewChatProviderSelection();
-      }
-    } finally {
-      refreshingNewChatCatalog = false;
-    }
-  }, 3000);
-});
-onUnmounted(() => { if (newChatCatalogPoll) clearInterval(newChatCatalogPoll); });
+function isCurrentNewChatOptionsLoad(sequence: number) {
+  return showNewChatModal.value && sequence === newChatOptionsLoadSequence;
+}
 
-async function openNewChatModal() {
+function handleNewChatAgentChange(value: "hermes" | ChatCodingAgentId) {
+  if (!newChatAgentOptions.value.some(option => option.value === value)) return;
+  preferredNewChatAgent = value;
+  newChatAgent.value = value;
+  try {
+    localStorage.setItem(NEW_CHAT_AGENT_STORAGE_KEY, value);
+  } catch {
+    // Keep the selection in memory when local storage is unavailable.
+  }
+}
+
+async function refreshNewChatAgentAvailability(sequence: number) {
+  newChatAgentLoading.value = !newChatAgentAvailability.value;
+  try {
+    const availability = await fetchAgentAvailabilitySnapshot();
+    if (!isCurrentNewChatOptionsLoad(sequence)) return;
+    newChatAgentAvailability.value = availability;
+    newChatAgent.value = newChatAgentOptions.value.find(option => option.value === preferredNewChatAgent)?.value
+      || newChatAgentOptions.value[0]?.value || AGENT_OPTIONS[0].value;
+  } catch {
+    if (isCurrentNewChatOptionsLoad(sequence) && !newChatAgentAvailability.value) {
+      message.error(t("codingAgents.loadFailed"));
+    }
+  } finally {
+    if (isCurrentNewChatOptionsLoad(sequence)) newChatAgentLoading.value = false;
+  }
+}
+
+async function loadNewChatProfiles(sequence: number) {
+  if (profilesStore.profiles.length > 0) return;
+  await profilesStore.fetchProfiles();
+  if (!isCurrentNewChatOptionsLoad(sequence)) return;
+  if (!profilesStore.profiles.some(profile => profile.name === newChatProfile.value)) {
+    newChatProfile.value = profilesStore.activeProfileName || profilesStore.profiles[0]?.name || "default";
+  }
+  ensureNewChatProviderSelection();
+}
+
+async function loadNewChatModels(sequence: number) {
+  newChatModelsLoading.value = appStore.modelGroups.length === 0 && appStore.profileModelGroups.length === 0;
+  if (!newChatModelsLoading.value) return;
+  try {
+    await appStore.loadModels();
+    if (isCurrentNewChatOptionsLoad(sequence)) ensureNewChatProviderSelection();
+  } finally {
+    if (isCurrentNewChatOptionsLoad(sequence)) newChatModelsLoading.value = false;
+  }
+}
+
+function openNewChatModal() {
+  const sequence = ++newChatOptionsLoadSequence;
   isBatchMode.value = false;
   selectedSessionKeys.value.clear();
   showBatchDeleteConfirm.value = false;
   newChatAgentPreset.value = undefined;
   newChatPresetReady.value = false;
+  if (isMobile.value) showSessions.value = false;
   showNewChatModal.value = true;
-  newChatLoading.value = true;
   newChatCategoryId.value = null;
-  try {
-    await loadSessionCategories();
-    if (profilesStore.profiles.length === 0) await profilesStore.fetchProfiles();
-    if (appStore.modelGroups.length === 0 && appStore.profileModelGroups.length === 0) {
-      await appStore.loadModels();
+  newChatProfile.value =
+    profilesStore.activeProfileName ||
+    profilesStore.profiles.find((profile) => profile.active)?.name ||
+    profilesStore.profiles[0]?.name ||
+    "default";
+  newChatWorkspace.value = "";
+  void initWorkspaceComposable().then(() => {
+    if (isCurrentNewChatOptionsLoad(sequence) && !newChatWorkspace.value) {
+      newChatWorkspace.value = mostRecentDefaultWorkspace.value || "";
     }
-    newChatProfile.value =
-      profilesStore.activeProfileName ||
-      profilesStore.profiles.find((profile) => profile.active)?.name ||
-      profilesStore.profiles[0]?.name ||
-      "default";
-    
-    // Initialize workspace composable and load defaults
-    initWorkspaceComposable(newChatProfile.value);
-    
-    // Auto-fill most recent default workspace if available
-    if (mostRecentDefaultWorkspace.value) {
-      newChatWorkspace.value = mostRecentDefaultWorkspace.value;
-    } else {
-      newChatWorkspace.value = "";
-    }
-    
-    syncNewChatModelSelection();
-  } finally {
-    newChatLoading.value = false;
-  }
+  });
+  syncNewChatModelSelection();
+
+  void refreshNewChatAgentAvailability(sequence);
+  void loadSessionCategories();
+  void loadNewChatProfiles(sequence);
+  void loadNewChatModels(sequence);
 }
 
 function handleNewChatProfileChange(value: string) {
@@ -1308,11 +1316,11 @@ async function confirmNewChat() {
     newChatLoading.value = true;
     try {
       const agentId = newChatAgent.value as CodingAgentId;
-      const status = await fetchCodingAgentsStatus();
-      const tool = status.tools.find((item) => item.id === agentId);
-      if (!tool?.installed) {
-        const fallbackName = newChatAgentOptions.value.find(option => option.value === agentId)?.label || agentId;
-        message.warning(t("codingAgents.installRequired", { agent: tool?.name || fallbackName }));
+      // Reuse the server inventory; probing every CLI's version delays creation.
+      const status = await fetchAgentAvailabilitySnapshot();
+      if (agentInstallationState(status, agentId) !== "installed") {
+        const agentName = newChatAgentOptions.value.find(option => option.value === agentId)?.label || agentId;
+        message.warning(t("codingAgents.installRequired", { agent: agentName }));
         showNewChatModal.value = false;
         await router.push({ name: "hermes.agentManager" });
         return;
@@ -1326,7 +1334,7 @@ async function confirmNewChat() {
   }
 
   const group = selectedNewChatProviderGroup.value;
-  const source = newChatAgent.value === "hermes" ? "cli" : "coding_agent";
+  const source = newChatAgent.value === "hermes" ? "cli" : newChatAgent.value === "ekko-agent" ? "builtin_agent" : "coding_agent";
   const codingAgentMode = effectiveNewChatAgentMode.value;
   const isGlobalCodingAgent = source === "coding_agent" && codingAgentMode === "global";
   const agent = newChatAgent.value === "codex"
@@ -1339,6 +1347,7 @@ async function confirmNewChat() {
         ? "grok"
       : newChatAgent.value === "dsh" ? "dsh" : newChatAgent.value === "opencode"
         ? "opencode"
+      : isNativeCodingAgent(newChatAgent.value) ? newChatAgent.value
       : newChatAgent.value === "antigravity" ? "antigravity" : newChatAgent.value === "cursor"
         ? "cursor"
       : newChatAgent.value === "ekko-agent"
@@ -1351,18 +1360,18 @@ async function confirmNewChat() {
     source,
     agent,
     codingAgentId: newChatAgent.value === "hermes" ? undefined : newChatAgent.value,
-    codingAgentMode: source === "coding_agent" ? codingAgentMode : undefined,
+    codingAgentMode: source === "coding_agent" || source === "builtin_agent" ? codingAgentMode : undefined,
     agentPreset: newChatAgent.value === "dsh" ? newChatAgentPreset.value : undefined,
     workspace: newChatWorkspace.value || null,
     categoryId: newChatCategoryId.value,
-    baseUrl: source === "coding_agent" && !isGlobalCodingAgent ? group?.base_url || newChatBaseUrl.value.trim() || undefined : undefined,
-    apiKey: source === "coding_agent" && !isGlobalCodingAgent && !newChatUsesKeylessProvider.value ? group?.api_key || newChatApiKey.value.trim() || undefined : undefined,
+    baseUrl: (source === "coding_agent" || source === "builtin_agent") && !isGlobalCodingAgent ? group?.base_url || newChatBaseUrl.value.trim() || undefined : undefined,
+    apiKey: (source === "coding_agent" || source === "builtin_agent") && !isGlobalCodingAgent ? group?.api_key || newChatApiKey.value.trim() || undefined : undefined,
     apiMode: isNewChatCodingAgent.value && !isGlobalCodingAgent ? newChatApiMode.value : undefined,
   });
   // Record workspace to recent list
-  if (newChatWorkspace.value && workspaceComposable) {
-    workspaceComposable.recordWorkspaceUsage(newChatWorkspace.value);
-    recentWorkspaces.value = workspaceComposable.loadRecentWorkspaces();
+  if (newChatWorkspace.value) {
+    try { await workspaceComposable.recordWorkspaceUsage(newChatWorkspace.value); }
+    catch { message.error(t("chat.workspaceSetFailed")); }
   }
   
   await router.push({
@@ -1773,6 +1782,7 @@ async function handleDeleteCategoryConfirm() {
 
 const canSetContextSessionModel = computed(() =>
   contextSession.value?.source === "cli" ||
+  contextSession.value?.source === "builtin_agent" ||
   (contextSession.value?.source === "coding_agent" && contextSession.value?.codingAgentMode !== "global"),
 );
 
@@ -2084,7 +2094,7 @@ const sessionModelSession = computed(() =>
 );
 
 const isSessionModelScopedCodingAgent = computed(() =>
-  sessionModelSession.value?.source === "coding_agent" &&
+  (sessionModelSession.value?.source === "coding_agent" || sessionModelSession.value?.source === "builtin_agent") &&
   sessionModelSession.value?.codingAgentMode !== "global",
 );
 const sessionModelCodingAgentId = computed<ChatCodingAgentId | undefined>(() =>
@@ -2099,6 +2109,7 @@ const sessionModelCodingAgentId = computed<ChatCodingAgentId | undefined>(() =>
         ? "grok"
       : sessionModelSession.value?.agent === "dsh" ? "dsh" : sessionModelSession.value?.agent === "opencode"
         ? "opencode"
+      : isNativeCodingAgent(sessionModelSession.value?.agent) ? sessionModelSession.value?.agent
       : sessionModelSession.value?.agent === "antigravity" ? "antigravity" : sessionModelSession.value?.agent === "cursor"
         ? "cursor"
       : sessionModelSession.value?.agent === "ekko-agent"
@@ -2911,16 +2922,19 @@ async function handleSessionModelCustomSubmit() {
           <label class="new-chat-field">
             <span class="new-chat-label">{{ t("chat.agent") }}</span>
             <NSelect
-              v-model:value="newChatAgent"
+              :value="newChatAgent"
+              @update:value="handleNewChatAgentChange"
               :options="newChatAgentOptions"
-              :disabled="newChatLoading"
+                :virtual-scroll="false"
+              :loading="newChatAgentLoading"
+              :disabled="newChatLoading || newChatAgentLoading"
             />
           </label>
           <DshSessionPresetSelect
             v-if="showNewChatModal && newChatAgent === 'dsh'"
             v-model="newChatAgentPreset" :disabled="newChatLoading" @valid="newChatPresetReady = $event"
           />
-          <label v-if="isNewChatExternalCodingAgent && newChatAgent !== 'cursor'" class="new-chat-field">
+          <label v-if="isNewChatExternalCodingAgent && !isGlobalOnlyCodingAgent(newChatAgent)" class="new-chat-field">
             <span class="new-chat-label">{{ t("codingAgents.launchModeScope") }}</span>
             <NRadioGroup v-model:value="newChatAgentMode" name="new-chat-coding-agent-mode">
               <NRadioButton
@@ -2937,7 +2951,7 @@ async function handleSessionModelCustomSubmit() {
             <NSelect
               :value="newChatProfile"
               :options="newChatProfileOptions"
-              :loading="newChatLoading || profilesStore.loading"
+              :loading="profilesStore.loading && profilesStore.profiles.length === 0"
               @update:value="handleNewChatProfileChange"
             />
           </label>
@@ -2949,7 +2963,7 @@ async function handleSessionModelCustomSubmit() {
               :options="newChatCategoryOptions"
               :placeholder="t('chat.categoryPlaceholder')"
               :loading="sessionCategoriesLoading || newChatCategoryCreating"
-              :disabled="newChatLoading || newChatCategoryCreating"
+              :disabled="newChatLoading || sessionCategoriesLoading || newChatCategoryCreating"
               filterable
               tag
               @update:value="handleNewChatCategoryChange"
@@ -2972,7 +2986,8 @@ async function handleSessionModelCustomSubmit() {
             <NSelect
               :value="newChatProvider"
               :options="newChatProviderOptions"
-              :disabled="newChatLoading"
+              :loading="newChatModelsLoading"
+              :disabled="newChatLoading || newChatModelsLoading"
               @update:value="handleNewChatProviderChange"
             />
           </label>
@@ -2983,7 +2998,8 @@ async function handleSessionModelCustomSubmit() {
             <NSelect
               v-model:value="newChatModel"
               :options="newChatModelOptions"
-              :disabled="newChatLoading || !newChatProvider"
+              :loading="newChatModelsLoading"
+              :disabled="newChatLoading || newChatModelsLoading || !newChatProvider"
               filterable
             />
           </label>
@@ -2992,7 +3008,7 @@ async function handleSessionModelCustomSubmit() {
             <NSelect
               v-model:value="newChatApiMode"
               :options="newChatApiModeOptions"
-              :disabled="newChatLoading || newChatUsesKeylessProvider"
+              :disabled="newChatLoading"
             />
           </label>
           <label v-if="newChatNeedsBaseUrl" class="new-chat-field">
@@ -3002,9 +3018,6 @@ async function handleSessionModelCustomSubmit() {
               :placeholder="t('models.baseUrlPlaceholder')"
             />
           </label>
-          <div v-if="newChatUsesProviderModel && newChatUsesKeylessProvider" class="new-chat-field">
-            {{ t("models.opencodeFreeHint") }}
-          </div>
           <label v-if="newChatNeedsApiKey" class="new-chat-field">
             <span class="new-chat-label">{{ t("models.apiKey") }}</span>
             <NInput

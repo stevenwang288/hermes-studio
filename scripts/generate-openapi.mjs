@@ -354,6 +354,22 @@ function addEndpoint(paths, method, path, controllerMethod, tagInfo, content, ma
       }
     }
   }
+  if (method === 'get' && ['/api/studio/sessions/hermes', '/api/studio/sessions/hermes/groups'].includes(openapiPath)) {
+    for (const parameter of parameters) {
+      if (parameter.name === 'agent_groups') {
+        parameter.schema = { type: 'string', enum: ['0', '1'], default: '0' }
+        parameter.description = 'Set to 1 to include legacy native Ekko identities in the builtin_agent history group. Native direct chats are stored as builtin_agent.'
+      } else if (parameter.name === 'source') {
+        parameter.schema = { type: 'string' }
+        parameter.description = 'History source to page. With agent_groups=1, builtin_agent selects native Ekko and coding_agent excludes it. Other sources retain their names.'
+      } else if (parameter.name === 'include') {
+        parameter.schema = { type: 'array', items: { type: 'string' } }
+        parameter.style = 'form'
+        parameter.explode = true
+        parameter.description = 'Repeat for each deep-linked session ID. Included and pinned sessions do not advance group pagination cursors.'
+      }
+    }
+  }
   if (parameters.length) operation.parameters = parameters
 
   const requestBody = generateRequestBody(method, controllerSource)
@@ -1037,12 +1053,12 @@ openapi.paths['/api/studio/chat-run/runs'] = {
               },
               source: {
                 type: 'string',
-                enum: ['cli', 'coding_agent', 'global_agent'],
-                description: 'Run backend source. Use cli for Hermes bridge runs, coding_agent for Claude Code/Codex, or global_agent for global-agent sessions. Omit source for normal Hermes chat runs; do not use the legacy api_server source.',
+                enum: ['cli', 'builtin_agent', 'coding_agent', 'global_agent', 'workflow', 'group_chat'],
+                description: 'Session source. Use cli for Hermes bridge runs, builtin_agent for native Ekko direct chats, coding_agent for external CLIs, or the matching group_chat/workflow/global_agent surface. Omit source for normal Hermes chat runs; do not use the legacy api_server source.',
               },
               session_source: {
                 type: 'string',
-                enum: ['global_agent'],
+                enum: ['global_agent', 'workflow', 'group_chat'],
                 description: 'Marks a coding-agent or bridge session as launched from the global agent.',
               },
               instructions: {
@@ -1061,12 +1077,12 @@ openapi.paths['/api/studio/chat-run/runs'] = {
               coding_agent_id: {
                 type: 'string',
                 enum: ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'ekko-agent'],
-                description: 'Coding agent id when source is coding_agent.',
+                description: 'External coding-agent runtime id. ekko-agent is accepted for legacy clients; new native Ekko requests use agent_id.',
               },
               agent_id: {
                 type: 'string',
                 enum: ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'ekko-agent'],
-                description: 'Alias for coding_agent_id.',
+                description: 'Runtime id. Use ekko-agent for native Ekko with source=builtin_agent; external CLI ids remain accepted.',
               },
               mode: {
                 type: 'string',
@@ -1473,6 +1489,30 @@ for (const operation of [usagePricingPath.get, usagePricingPath.put]) {
   operation.responses['200'] = { description: 'Saved pricing', content: { 'application/json': { schema: usageRatesSchema } } }
 }
 usagePricingPath.put.responses['400'] = { description: 'Invalid or duplicate provider/model pricing' }
+
+// Account-owned workspace shortcuts. No local-storage import or profile dimension.
+const workspaceDirectorySchema = { type: 'object', required: ['path', 'isFavorite', 'lastUsed', 'useCount', 'createdAt', 'updatedAt'], properties: {
+  path: { type: 'string' }, isFavorite: { type: 'boolean' },
+  ...Object.fromEntries(['lastUsed', 'useCount', 'createdAt', 'updatedAt'].map(key => [key, { type: 'integer', minimum: 0 }])),
+} }
+const workspaceDirectoryResponse = { type: 'object', required: ['directories'], properties: {
+  directories: { type: 'array', items: workspaceDirectorySchema },
+} }
+const workspaceDirectoriesPath = openapi.paths['/api/studio/workspace/directories']
+for (const [method, operation] of Object.entries(workspaceDirectoriesPath)) {
+  operation.operationId = { get: 'listWorkspaceDirectories', post: 'recordWorkspaceDirectory', patch: 'setWorkspaceDirectoryFavorite' }[method]
+  operation.description = 'Directory history and favorites for the authenticated Studio account, shared by Studio and App across Profiles. System-generated workspaces are excluded. Timestamps are Unix milliseconds.'
+  operation.responses['200'] = { description: 'Account directory shortcuts', content: { 'application/json': { schema: workspaceDirectoryResponse } } }
+  operation.responses['401'] = { description: 'Authenticated account required' }
+  if (method === 'get') continue
+  operation.requestBody = { required: true, content: { 'application/json': { schema: {
+    type: 'object', required: method === 'patch' ? ['path', 'favorite'] : ['path'], properties: {
+      path: { type: 'string', minLength: 1, maxLength: 4096 },
+      ...(method === 'patch' ? { favorite: { type: 'boolean' } } : {}),
+    },
+  } } } }
+  operation.responses['400'] = { description: 'Invalid directory path or favorite value' }
+}
 
 // Write output
 const outputPath = join(rootDir, 'docs/openapi.json')

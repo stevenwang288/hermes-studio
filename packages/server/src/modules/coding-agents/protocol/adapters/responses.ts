@@ -457,7 +457,9 @@ export function truncateResponsesToolOutputs(body: any): any {
 
   let changed = false
   const nextInput = input.map((item: any) => {
-    if (!item || typeof item !== 'object' || item.type !== 'function_call_output' || typeof item.output !== 'string') {
+    if (!item || typeof item !== 'object'
+      || (item.type !== 'function_call_output' && item.type !== 'custom_tool_call_output')
+      || typeof item.output !== 'string') {
       return item
     }
     const nextOutput = truncateResponsesToolOutputText(item.output)
@@ -534,7 +536,9 @@ export function responseToolNamespaceForName(name: unknown): string | undefined 
 
 export function normalizeResponseFunctionCall(name: unknown, argumentsValue: unknown): { name: string; arguments: string; namespace?: string } {
   const rawName = String(name || 'tool')
-  const rawArguments = String(argumentsValue || '{}')
+  // An empty string starts streamed arguments; adding {} would corrupt the
+  // JSON when the client appends subsequent argument deltas.
+  const rawArguments = String(argumentsValue ?? '{}')
   const namespace = normalizedNamespaceName(rawName)
   if (namespace.startsWith('mcp__')) {
     const parsed = safeJsonParse(rawArguments)
@@ -854,6 +858,11 @@ export function responsesToOpenAiChat(body: any, target: ResponsesAdapterTarget,
     ...(typeof body?.top_p === 'number' ? { top_p: body.top_p } : {}),
     ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
     ...(tools?.length ? { tools } : {}),
+    // OpenAI-compatible streaming providers (notably vLLM) omit token usage
+    // from the final SSE chunk unless the client explicitly requests it.
+    // Without this the Responses→Chat Completions conversion never receives a
+    // usage frame, so the turn lands with zero/missing token accounting.
+    ...(stream ? { stream_options: { include_usage: true } } : {}),
     stream,
   }
 }
