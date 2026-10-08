@@ -73,10 +73,14 @@ taskkill /IM "Ekko Studio.exe" /F 2>/dev/null
 ```bash
 # 删空壳目录（卸载后应只剩空的 Hermes Studio\ 容器）
 rm -rf "$LOCALAPPDATA/Programs/Hermes Studio" 2>/dev/null
-# 验证 InstallLocation 已不存在（关键门禁，空=通过）
-reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\f6bd0604-87fa-534e-9fb2-f5a02394db55" /v InstallLocation 2>&1 | grep -q "Hermes" && echo "FAIL: 注册表未清" || echo "PASS: InstallLocation 已清"
+# 验证决定路径的键已不存在（关键门禁）：
+# electron-builder 读的是 HKCU\Software\<APP_GUID>\InstallLocation（实测 GUID 键 = f6bd0604-...）
+reg query "HKCU\Software\f6bd0604-87fa-534e-9fb2-f5a02394db55" /v InstallLocation 2>&1 | grep -q "Hermes" && echo "FAIL: 注册表未清, 新装会复用旧目录" || echo "PASS: InstallLocation 已清, 新装将落标准路径"
 ```
-> 注：APP_GUID 卸载键也一并删除；若 f6bd0604 键整体消失则更干净。
+> 注：`f6bd0604-...` 是 APP_GUID 键（NSIS 用 `Software\<APP_GUID>` 存 InstallLocation），
+> 卸载器删除该键；若整个键消失则更干净。另外两个历史键
+> `48ae4bdc-...`（hermes-desktop）和 `3a796f66-...`（hermes-studio-self）指向的目录已不存在，
+> 属孤儿记录，可一并 `reg delete` 清理（可选）。
 
 ### ④ 重装到标准路径
 ```bash
