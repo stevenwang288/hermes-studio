@@ -132,6 +132,47 @@ describe('ekko-agent model requests', () => {
     ]))
   })
 
+  it('keeps the first tool call id/name when streamed deltas repeat with empty strings (SenseNova/DeepSeek V4.1)', async () => {
+    // 商汤(经 New API 网关)实测流式增量:首个分片带完整 id+name,后续分片 id/name 为空字符串。
+    // 旧实现用 ?? 合并,空串覆盖首分片完整 id/name → invalid_tool_call;|| 只在有值时更新。
+    const encoder = new TextEncoder()
+    let call = 0
+    const fetchMock = vi.fn(async () => {
+      call += 1
+      const frames = call === 1
+        ? [
+            'data: {"id":"chatcmpl_tc","choices":[{"delta":{"role":"assistant","reasoning_content":"Let me check.","tool_calls":[{"index":0,"id":"call_2b3848cdd36d4b7c9662b668","type":"function","function":{"name":"get_time","arguments":""}}]},"finish_reason":""}]}\n\n',
+            'data: {"id":"chatcmpl_tc","choices":[{"delta":{"tool_calls":[{"index":0,"id":"","type":"function","function":{"name":"","arguments":"{}"}}]},"finish_reason":""}]}\n\n',
+            'data: {"id":"chatcmpl_tc","choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n',
+            'data: [DONE]\n\n',
+          ]
+        : [
+            'data: {"id":"chatcmpl_final","choices":[{"delta":{"content":"Time is 14:30"},"finish_reason":"stop"}]}\n\n',
+            'data: [DONE]\n\n',
+          ]
+      return new Response(new ReadableStream({
+        start(controller) {
+          for (const frame of frames) controller.enqueue(encoder.encode(frame))
+          controller.close()
+        },
+      }), { status: 200 })
+    })
+    const tools = new AgentToolRegistry()
+    tools.register({
+      definition: { name: 'get_time', parameters: { type: 'object', properties: {} } },
+      async execute() {
+        return { ok: true, content: '14:30' }
+      },
+    })
+    const client = createModelClient(providerConfig, { fetch: fetchMock })
+    const runtime = new AgentRuntime({ modelClient: client, tools })
+
+    const result = await runtime.run({ messages: ['What time is it?'] })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(result.output.content).toBe('Time is 14:30')
+  })
+
   it('filters invalid Chat tool history and its orphaned tool result', () => {
     const payload = toOpenAIChatPayload(providerConfig, {
       messages: [
