@@ -11,7 +11,7 @@
 |------|------|------|
 | `sync` | **0.7.32** | 唯一有效分支。= 上游 `main` 最新 + 5 项自研功能，已通过 `npm run build` + 桌面 `tsc --noEmit` 验证 |
 
-**最近一次合并（2026-10-08）**：上游 0.7.29 → 0.7.32 共 28 个提交（六个原生 coding agents 桌面集成、P2P STUN 修复、主题持久化、desktop 截图/全局快捷键、账号工作区持久化）。**1 个文件冲突（abort.ts）已解决**：`markAbortCompleted` 冲突取上游（0.7.32 #3321 引入 abortRequests/abortCompletions WeakMap claim 机制 + isCurrent()，取代旧 abortFinalized 幂等标志），`run.queued` 事件保留自研 `queued_messages` 字段（消息队列前端依赖）。5 组自研均确认保留。**新坑：desktop tsc 报 `Cannot find module 'dbus-next'`** — 上游新增 Linux 截屏功能依赖，desktop 独立包需 `npm ci --include=dev`；本机 npm 全局配置 `omit=dev` 导致 tsc 解析到根目录 typescript@6.0.3（报 moduleResolution=node10 deprecated），必须 `npm ci --include=dev` 装出 desktop 本地 5.6.3 再验 tsc。
+**2026-10-08 决策：桌面版打包从 GitHub Actions 云编译改为本地打包**（用户拍板）。原因：云编译下载 artifact 慢且易断（直连 33KB/s 超时、代理断流 139MB，实测两次失败才续传成功），本地打包一条命令 10-26 分钟出 exe 且天然对应本地 commit。**本地打包铁律：打包前必须根目录 `npm prune --omit=dev`**（不 prune 会把 937MB dev 依赖塞进 webui/node_modules，exe 从 198MB 膨胀到 321MB），打完后 `npm install --include=dev` 恢复（否则 vue-tsc 等 dev 工具消失）。产物 3 个：`Ekko.Studio-<ver>-x64.exe` + `.blockmap` + `latest.yml`（blockmap/latest.yml 是自动更新必需，别删）。命令：`cd packages/desktop && npm ci --include=dev && npm run dist:win`（首次自动下 electron 二进制，需代理 10808）。本地实测 exe 198MB 与云端 195MB 一致。
 | `main` | 0.7.21 | 停用的旧基线，**勿用** |
 
 **最近一次合并（2026-10-03）**：上游 0.7.27 → 0.7.29 共 11 个提交（Antigravity CLI 全局集成、API relay 合作方页面+按 key 用量、设备连接图标区分、workspace 下载恢复、Claude text snapshot 修复）。**0 个文件冲突，干净 merge**；4 组自研（消息队列/字体缩放/路径显示/链接默认 Chrome）均确认保留。桌面版 0.7.29 exe 已云编译交付。
