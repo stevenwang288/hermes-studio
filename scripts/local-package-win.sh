@@ -31,11 +31,11 @@ SIZE=$(stat -c%s "$EXE")
 echo "exe: $EXE ($((SIZE/1024/1024))MB)"
 if [ "$SIZE" -gt 300000000 ]; then echo "错误: exe 超 300MB, 打包前没 prune dev?"; exit 1; fi
 
-echo "[5/6] 拷贝到 D:/desk (删旧版 exe/blockmap/latest.yml, 只留最新)"
+echo "[5/6] 拷贝到 D:/desk (只放安装程序 exe, 删旧版)"
 cd "$ROOT/packages/desktop/release"
 rm -f "$DESK"/Ekko.Studio-*.exe* "$DESK"/latest.yml 2>/dev/null || true
-cp "Ekko.Studio-$VER-x64.exe" "Ekko.Studio-$VER-x64.exe.blockmap" latest.yml "$DESK/"
-ls -la "$DESK" | grep -iE "studio.*exe|latest.yml"
+cp "Ekko.Studio-$VER-x64.exe" "$DESK/"
+ls -la "$DESK" | grep -iE "studio.*exe"
 
 echo "[6/6] 恢复根目录 dev 依赖(否则 vue-tsc/eslint 等消失)"
 cd "$ROOT" && npm install --include=dev --no-audit --no-fund 2>&1 | tail -2

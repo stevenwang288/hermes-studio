@@ -308,11 +308,15 @@ bash scripts/local-package-win.sh
 | 2 | `packages/desktop` 独立 `npm ci --include=dev` | tsc / electron-builder 都要 dev |
 | 3 | `npm run dist:win` | 首次下 electron 二进制需代理 10808（`ELECTRON_GET_USE_PROXY=1`），之后走缓存 |
 | 4 | 验证产物大小 | 期望 **195~200MB**，>300MB 说明没 prune |
-| 5 | 拷 3 件套到 `d:\desk` + 删旧版 | 产物 = `Ekko.Studio-<ver>-x64.exe` + `.blockmap` + `latest.yml` |
+| 5 | 拷 exe 到 `d:\desk` + 删旧版 | **只放安装程序 exe**；`.blockmap`/`latest.yml` 仅自动更新用，本 fork 不发布更新服务器，不需要 |
 | 6 | 根目录 `npm install --include=dev` 恢复 dev | 否则 `vue-tsc`/`eslint` 消失 |
 
-> **blockmap / latest.yml 是自动更新必需，别删**（只拷 exe 会让自动更新失效）。
-> 云编译走不通且本地也拉不到 electron 时的极小概率退路：手动 `cd packages/desktop && npm run dist:win`。
+> **桌面只放 `Ekko.Studio-<ver>-x64.exe` 一个文件即可**（2026-10-10 大哥定的）。
+> 构建产物里另有 `.blockmap` + `latest.yml`，那是给 electron-updater 差分更新用的「三件套」，
+> 只在把三个文件一起发布到更新服务器时才有意义。本 fork 的 `app-update.yml` 指向的是
+> **上游** `download.ekkolearnai.com`（从没往那发布过），所以这两个文件放桌面纯属占地方。
+> 它们仍保留在 `packages/desktop/release/`，不用删。
+> 注：`autoUpdater.autoDownload = false`，不会自动下载；但托盘「检查更新」查的是上游，留意别用它覆盖自研。
 
 ### 装到本机（**这一步也不能省**）
 
