@@ -60,3 +60,9 @@ packages/client/src/**/*.js
 .playwright-cli/
 # Local npm release tarballs
 /release/npm/
+
+# 本地构建/会话杂物（不入库）
+.workbuddy/
+.playwright-mcp/
+dist.old-*/
+NUL

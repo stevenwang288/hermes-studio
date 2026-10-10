@@ -5,11 +5,13 @@
 
 本仓库是 `EKKOLearnAI/hermes-studio` 的 fork，**2026-09-16 全新重建**：以官方 v0.7.21 为基线，只合入自研功能，版本号跟随官方（不做 fork 标记，避免启动提示）。
 
-## 当前状态（2026-10-02 校准）
+## 当前状态（2026-10-10 校准）
 
 | 分支 | 版本 | 说明 |
 |------|------|------|
-| `sync` | **0.7.32** | 唯一有效分支。= 上游 `main` 最新 + 5 项自研功能，已通过 `npm run build` + 桌面 `tsc --noEmit` 验证 |
+| `sync` | **0.7.33** | 唯一有效分支。= 上游 `main` 最新 + 6 项自研功能，已通过 `npm run build` + 桌面 `tsc --noEmit` 验证 |
+
+**最近一次合并（2026-10-10）**：上游 0.7.32 → 0.7.33 共 11 个提交（重做「新建聊天」页：drawer → 响应式 Agent 卡片 `NewChatAgentCards.vue`；上下文压缩/用量统计修复 `handle-bridge-run.ts`/`context-compressor`；token BPE 二次复杂度防护；ACP 管道容忍依赖 stdout 噪声；移动端导航抽屉宽度）。**0 个文件冲突，干净 merge**；仅 3 个文件与自研重叠（`ChatInput.vue`/`ChatPanel.vue`/`stores/hermes/chat.ts`），git 自动合并后逐项 grep 确认 6 项自研全部保留。本地 `npm run build` + 桌面 `tsc --noEmit` 均通过。
 
 **2026-10-08 决策：桌面版打包从 GitHub Actions 云编译改为本地打包**（用户拍板）。原因：云编译下载 artifact 慢且易断（直连 33KB/s 超时、代理断流 139MB，实测两次失败才续传成功），本地打包一条命令 10-26 分钟出 exe 且天然对应本地 commit。**本地打包铁律：打包前必须根目录 `npm prune --omit=dev`**（不 prune 会把 937MB dev 依赖塞进 webui/node_modules，exe 从 198MB 膨胀到 321MB），打完后 `npm install --include=dev` 恢复（否则 vue-tsc 等 dev 工具消失）。产物 3 个：`Ekko.Studio-<ver>-x64.exe` + `.blockmap` + `latest.yml`（blockmap/latest.yml 是自动更新必需，别删）。命令：`cd packages/desktop && npm ci --include=dev && npm run dist:win`（首次自动下 electron 二进制，需代理 10808）。本地实测 exe 198MB 与云端 195MB 一致。
 | `main` | 0.7.21 | 停用的旧基线，**勿用** |
@@ -32,7 +34,7 @@
 
 ---
 
-## 保留的自研功能（3 项）
+## 保留的自研功能（6 项）
 
 ### 1. 消息队列
 
@@ -77,6 +79,13 @@
 |------|------|
 | `server/src/modules/hermes/controllers/weixin.ts` | `save()` 额外写入 `WEIXIN_DM_POLICY=open` + `WEIXIN_ALLOW_ALL_USERS=true`：Hermes 默认微信 DM 策略是 `pairing`（配对模式），Studio 页面扫码保存只写凭据不写策略，导致扫码用户被当陌生用户拒绝（日志 `Unauthorized user`）。扫码即代表用户主动授权，自动写 open 让新 bot 开箱即用。想收紧可自行改 .env |
 | 备注 | 官方 hermes runtime（0.20.6）doc 也要求配 `WEIXIN_DM_POLICY=open`；`getupdates` 空 buf 拉取会推进服务端游标，排查微信收不到消息时别手动拉队列（会消费掉 gateway 待拉消息） |
+
+### 6. 流式 tool_calls 空串覆盖修复（2026-10-10 新增）
+
+| 文件 | 改动 |
+|------|------|
+| `packages/ekko-agent/src/model/providers/openai-compatible.ts` | 流式增量里后续分片可能带**空字符串** `id`/`name`（DeepSeek V4.1/商汤实测），原 `?? current.id` 只在 null/undefined 时保留、**空串会覆盖**首分片的完整值 → `invalid_tool_call`。改为 `\|\|` 只在有值时更新。作用：修好这两个模型的工具调用报错 |
+| 测试 | `tests/ekko-agent/model-request.test.ts` |
 
 ---
 

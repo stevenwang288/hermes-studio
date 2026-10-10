@@ -109,7 +109,7 @@ node scripts/verify-fleet.mjs 935      # 单台
 
 ---
 
-## 3. 4 项自研功能（冲突时保留，别弄丢）
+## 3. 6 项自研功能（冲突时保留，别弄丢）
 
 | # | 功能 | 主要文件 |
 |---|------|----------|
@@ -117,6 +117,8 @@ node scripts/verify-fleet.mjs 935      # 单台
 | 2 | **Windows 桌面版字体缩放**：Ctrl + `+`/`-`/`0`，步进 0.5，范围 −3~4，持久化 `userData/desktop-zoom.json` | `desktop/src/main/index.ts` |
 | 3 | **路径完整显示**：workspace 徽标显示全路径，不截断 | `client/src/components/hermes/chat/ChatPanel.vue` |
 | 4 | **链接默认用 Chrome 打开 + 内置浏览器错位修复**（2026-10-02）：点 URL 不再进内置 WebContentsView（指纹/登录态/代理硬伤），优先 `spawn` 系统 Chrome；`setViewport` 乘 zoomFactor 修复字体缩放后内嵌浏览器错位 | `client/src/utils/desktop-browser.ts`<br>`desktop/src/main/browser/browser-manager.ts`<br>`desktop/src/main/index.ts` |
+| 5 | **微信扫码保存自动开 DM 策略**（2026-10-03）：扫码保存凭据时额外写 `WEIXIN_DM_POLICY=open` + `WEIXIN_ALLOW_ALL_USERS=true`，新 bot 开箱即用不被 pairing 策略拒 | `server/src/modules/hermes/controllers/weixin.ts` |
+| 6 | **流式 tool_calls 空串覆盖修复**（2026-10-10）：DeepSeek V4.1/商汤的流式分片会带空串 `id`/`name`，`??` 会让空串覆盖首分片 → `invalid_tool_call`；改用 `\|\|` 只在有值时更新 | `packages/ekko-agent/src/model/providers/openai-compatible.ts` |
 
 测试：`tests/server/chat-run-promote.test.ts`
 
@@ -288,43 +290,53 @@ token 来源：环境变量 `GITHUB_TOKEN`（`ghp_` 开头，40 字符）。
 > 上游在 **0.7.23 把安装包命名从 `Hermes.Studio-` 改成了 `Ekko.Studio-`**。
 > 产品名/任务栏一直是 `Ekko Studio`。**以实际构建输出为准**，别想当然套旧名字。
 
-### 怎么出
+### 怎么出（**2026-10-08 起改为本地打包**）
 
-走 GitHub Actions 云编译，本地不跑长时构建：
+云编译已弃用（下载 artifact 慢且易断：直连 33KB/s 超时、代理断流 139MB，实测两次失败才续传成功）。
+**改本地一条命令**，10~26 分钟出 exe，且天然对应本地 commit：
 
 ```bash
-gh workflow run "Manual Desktop Build" --repo stevenwang288/hermes-studio \
-  --ref sync -f target_os=win32 -f target_arch=x64
-gh run list --repo stevenwang288/hermes-studio --branch sync --limit 3
-gh run download <RUN_ID> --repo stevenwang288/hermes-studio \
-  --name desktop-win32-x64 --dir "$TEMP/hermes-build"
+cd /d/OneDrive/steven/code/ai/13IDE/hermes-studio
+bash scripts/local-package-win.sh
 ```
 
-下载后：**最新 exe 放到 `d:\desk\`**，同时保留一份到 `packages/desktop/release/`，
-并清理 `d:\desk` 下的旧版本安装程序（只留最新）。
+脚本一条龙做完 6 件事，**中途别插手**（见 `scripts/local-package-win.sh`）：
+
+| 步 | 动作 | 铁律 |
+|----|------|------|
+| 1 | 根目录 `npm prune --omit=dev` | **必须 prune**，否则 dev 依赖打进 `webui/node_modules`，exe 从 198MB 膨胀到 321MB |
+| 2 | `packages/desktop` 独立 `npm ci --include=dev` | tsc / electron-builder 都要 dev |
+| 3 | `npm run dist:win` | 首次下 electron 二进制需代理 10808（`ELECTRON_GET_USE_PROXY=1`），之后走缓存 |
+| 4 | 验证产物大小 | 期望 **195~200MB**，>300MB 说明没 prune |
+| 5 | 拷 3 件套到 `d:\desk` + 删旧版 | 产物 = `Ekko.Studio-<ver>-x64.exe` + `.blockmap` + `latest.yml` |
+| 6 | 根目录 `npm install --include=dev` 恢复 dev | 否则 `vue-tsc`/`eslint` 消失 |
+
+> **blockmap / latest.yml 是自动更新必需，别删**（只拷 exe 会让自动更新失效）。
+> 云编译走不通且本地也拉不到 electron 时的极小概率退路：手动 `cd packages/desktop && npm run dist:win`。
 
 ### 装到本机（**这一步也不能省**）
 
 用户的桌面版要跟着升到同一版本。安装程序是 NSIS，支持静默覆盖安装：
 
 ```bash
-"d:/desk/Hermes.Studio-<version>-x64.exe" /S
+"d:/desk/Ekko.Studio-<version>-x64.exe" /S
 ```
 
-安装位置：`C:\Users\baba1\AppData\Local\Programs\Hermes Studio\`
+安装位置：`C:\Users\baba1\AppData\Local\Programs\Ekko Studio\`
 
 安装后验证：
 
 ```bash
-# 1) 版本号
-powershell -c "(Get-Item 'C:\Users\baba1\AppData\Local\Programs\Hermes Studio\Ekko Studio.exe').VersionInfo.ProductVersion"
+# 1) 版本号（注意实际目录是 Ekko Studio，不是 Hermes Studio）
+powershell -c "(Get-Item 'C:\Users\baba1\AppData\Local\Programs\Ekko Studio\Ekko Studio.exe').VersionInfo.ProductVersion"
 # 2) 进程在跑
 tasklist | grep -i "Ekko Studio"
 ```
 
-> **云编译走不通时（GitHub 不通）的退路**：本地打包
-> `cd packages/desktop && npm run dist:win`
-> （需能拉到 electron 二进制；产物同样落在 `packages/desktop/release/`）
+> **装完启动若报「启动本地服务失败 / Web UI shell did not become ready within 120000ms」**：
+> 这不是代码崩，是桌面壳对 `127.0.0.1:<port>/health/ready` 的 120s 就绪探测超时
+> （服务端日志其实全绿）。处置：点 Retry / 彻底退出重启；仍不行则设环境变量
+> `HERMES_DESKTOP_READY_TIMEOUT_MS=240000`。详见 `docs/upstream-sync-and-fleet-deploy.md`。
 
 ---
 
