@@ -34,13 +34,27 @@ describe('shared MCP task plans', () => {
     expect(runs.update(contextId, 'research', steps()).revision).toBe(1)
   })
 
-  it.each(['ended', 'interrupted', 'failed'] as const)('settles %s without falsely completing unfinished steps', terminal => {
+  it.each(['interrupted', 'failed'] as const)('settles %s without falsely completing unfinished steps', terminal => {
     const { runs, contextId, publish } = harness()
     runs.update(contextId, 'research', steps())
     runs.finishSession('session-1', terminal)
     expect(publish).toHaveBeenLastCalledWith('session-1', expect.objectContaining({
       revision: 2, execution_state: terminal, plan: [
         expect.objectContaining({ status: 'completed' }), expect.objectContaining({ status: 'pending' }),
+      ],
+    }))
+    runs.finish(contextId, terminal)
+    expect(publish).toHaveBeenCalledTimes(2)
+    expect(() => runs.update(contextId, 'research', steps())).toThrow('expired')
+  })
+
+  it('settles ended runs by folding unfinished steps to completed (green card even when the final turn forgot update_plan)', () => {
+    const { runs, contextId, publish } = harness()
+    runs.update(contextId, 'research', steps())
+    runs.finishSession('session-1', 'ended')
+    expect(publish).toHaveBeenLastCalledWith('session-1', expect.objectContaining({
+      revision: 2, execution_state: 'ended', plan: [
+        expect.objectContaining({ status: 'completed' }), expect.objectContaining({ status: 'completed' }),
       ],
     }))
     runs.finish(contextId, 'ended')

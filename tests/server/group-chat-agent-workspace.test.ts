@@ -1561,7 +1561,7 @@ describe('group chat agent workspace bridge runs', () => {
     }))
   })
 
-  it.each(['ended', 'interrupted', 'failed'] as const)('gives Hermes a plan-only context and persists its %s state', async terminal => {
+  it.each(['interrupted', 'failed'] as const)('gives Hermes a plan-only context and persists its %s state', async terminal => {
     const { TaskPlanRuns } = await import('../../packages/server/src/modules/studio/services/task-plan-runs')
     const fallbackPublish = vi.fn()
     const plans = new TaskPlanRuns(vi.fn(), fallbackPublish)
@@ -1589,6 +1589,31 @@ describe('group chat agent workspace bridge runs', () => {
     expect(cards).toHaveLength(2)
     expect(cards[0].id).toBe(cards[1].id)
     expect(JSON.parse(cards[1].content)).toMatchObject({ revision: 2, execution_state: terminal, plan: [{ status: 'pending' }] })
+    expect(fallbackPublish).not.toHaveBeenCalled()
+    expect(() => plans.update(contextId, 'default', { plan: [] })).toThrow('expired')
+  })
+
+  it('gives Hermes a plan-only context and folds its steps to completed when the run ends normally', async () => {
+    const { TaskPlanRuns } = await import('../../packages/server/src/modules/studio/services/task-plan-runs')
+    const fallbackPublish = vi.fn()
+    const plans = new TaskPlanRuns(vi.fn(), fallbackPublish)
+    const client = await createClient('')
+    let contextId = ''
+    client.setChatRunService({
+      runAndWait: vi.fn(), abortSession: vi.fn(),
+      beginGroupTaskPlanRun(sessionId: string, profile: string, runId: string, isCurrent: () => boolean, publish: any) {
+        contextId = plans.begin(sessionId, profile, () => ({ isWorking: isCurrent(), activeRunMarker: runId }), publish)
+        return { contextId, finish: (state: any) => plans.finish(contextId, state) }
+      },
+    })
+    bridgeMock.chat.mockImplementation(async (sessionId: string) => {
+      plans.update(contextId, 'default', { plan: [{ id: 'a', step: 'Inspect', status: 'in_progress' }] })
+      return { ok: true, run_id: 'bridge-run-id', session_id: sessionId, status: 'running' }
+    })
+    await client.replyToMention('room-1', { content: '@Worker inspect', senderName: 'Alice', senderId: 'user-1', timestamp: 1 })
+    const cards = mockSocket.emit.mock.calls.filter(call => call[0] === 'message' && call[1]?.tool_name === 'task_plan').map(call => call[1])
+    expect(cards).toHaveLength(2)
+    expect(JSON.parse(cards[1].content)).toMatchObject({ revision: 2, execution_state: 'ended', plan: [{ status: 'completed' }] })
     expect(fallbackPublish).not.toHaveBeenCalled()
     expect(() => plans.update(contextId, 'default', { plan: [] })).toThrow('expired')
   })

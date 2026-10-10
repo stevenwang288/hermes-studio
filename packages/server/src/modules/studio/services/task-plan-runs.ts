@@ -106,10 +106,18 @@ export class TaskPlanRuns {
     this.bindings.delete(contextId)
     if (this.sessions.get(binding.sessionId) === contextId) this.sessions.delete(binding.sessionId)
     if (!binding.snapshot) return
+    // Run termination settles the card per execution state:
+    // - ended (normal completion): every unfinished step is folded to completed,
+    //   so a run whose final turn forgot to call update_plan still shows a green card.
+    // - interrupted / failed: unfinished steps stay pending so the card tells the
+    //   truth that work was cut short (the controller separately shows the state label).
+    const settled = executionState === 'ended'
     const snapshot: TaskPlanSnapshot = {
       ...binding.snapshot, revision: binding.snapshot.revision + 1, execution_state: executionState,
       updated_at: Date.now(),
-      plan: binding.snapshot.plan.map(step => ({ ...step, status: step.status === 'in_progress' ? 'pending' : step.status })),
+      plan: binding.snapshot.plan.map(step => ({
+        ...step, status: settled ? 'completed' : (step.status === 'in_progress' ? 'pending' : step.status),
+      })),
     }
     this.commit(snapshot)
     binding.publish ? binding.publish(snapshot) : this.publish(binding.sessionId, snapshot)
