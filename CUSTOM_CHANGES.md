@@ -13,6 +13,12 @@
 
 **最近一次合并（2026-10-10）**：上游 0.7.32 → 0.7.33 共 11 个提交（重做「新建聊天」页：drawer → 响应式 Agent 卡片 `NewChatAgentCards.vue`；上下文压缩/用量统计修复 `handle-bridge-run.ts`/`context-compressor`；token BPE 二次复杂度防护；ACP 管道容忍依赖 stdout 噪声；移动端导航抽屉宽度）。**0 个文件冲突，干净 merge**；仅 3 个文件与自研重叠（`ChatInput.vue`/`ChatPanel.vue`/`stores/hermes/chat.ts`），git 自动合并后逐项 grep 确认 6 项自研全部保留。本地 `npm run build` + 桌面 `tsc --noEmit` 均通过。
 
+**2026-10-10 部署记录**：4 台 PVE（931/935/936/961）全部升级 **0.7.33**（commit `02ad300e`），逐台核对 `dist/server/index.js` 为新构建 + `curl 8648` 4/4 HTTP 200；**浏览器端验收（发加法题 AI 答对）4/4 通过**。踩坑（都已写进 MAINTAIN.md 第 4 节与故障速查）：
+- **元凶是 npm 源/代理四台不统一**：936 出厂 `registry.npmjs.org`（拉不到包 → 缺 `werift@0.24.4` → build `TS2307`）；935 连 npmmirror 直连也不通，必须挂 7890 代理。统一为 `registry.npmmirror.com` + `proxy/https-proxy=127.0.0.1:7890`。
+- **`deploy-pve.sh` 的 `npm ... | tail` 吞退出码** → 935/936 表面"完成"、实则 build 失败，服务重启后**跑的是上个版本的旧 dist**（package.json 却是 0.7.33）。**部署后必须核对 `dist` mtime**。
+- **931/961 当天都是 stopped**（`qm start` 拉起）。
+- **`scripts/verify-fleet.mjs` 有 bug**（`.mjs` 用 `require`）→ 临时 `cp` 成 `.cjs` 才跑通；**待修**。
+
 **2026-10-08 决策：桌面版打包从 GitHub Actions 云编译改为本地打包**（用户拍板）。原因：云编译下载 artifact 慢且易断（直连 33KB/s 超时、代理断流 139MB，实测两次失败才续传成功），本地打包一条命令 10-26 分钟出 exe 且天然对应本地 commit。**本地打包铁律：打包前必须根目录 `npm prune --omit=dev`**（不 prune 会把 937MB dev 依赖塞进 webui/node_modules，exe 从 198MB 膨胀到 321MB），打完后 `npm install --include=dev` 恢复（否则 vue-tsc 等 dev 工具消失）。产物 3 个：`Ekko.Studio-<ver>-x64.exe` + `.blockmap` + `latest.yml`；但**桌面 `d:\desk` 只放 exe**（2026-10-10 大哥定）—— `.blockmap`/`latest.yml` 是 electron-updater 差分更新用的，本 fork 不发布更新服务器（`app-update.yml` 指向的是上游 `download.ekkolearnai.com`），放桌面无用，留在 `packages/desktop/release/` 即可。命令：`cd packages/desktop && npm ci --include=dev && npm run dist:win`（首次自动下 electron 二进制，需代理 10808）。本地实测 exe 198MB 与云端 195MB 一致。
 | `main` | 0.7.21 | 停用的旧基线，**勿用** |
 

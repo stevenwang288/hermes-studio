@@ -164,6 +164,34 @@ EOF
 
 936 额外要 `chown -R ubuntu:ubuntu`.
 
+### ⚠ 四台必须先统一 npm 源/代理（2026-10-10 实测，不统一必翻车）
+
+```bash
+# 每台都执行一次
+npm config set registry https://registry.npmmirror.com
+npm config set proxy http://127.0.0.1:7890
+npm config set https-proxy http://127.0.0.1:7890
+```
+
+- **936 出厂是 `registry.npmjs.org`** → 拉不到包 → 缺 `werift@0.24.4`（必需依赖）→ build 报
+  `TS2307 Cannot find module 'werift'`。
+- **935 直连 npmmirror 也不通**，必须挂 7890 代理。
+- 判据：`ls node_modules/werift` 必须是"有"。
+
+### ⚠ 部署后必须核对 4 项（别只信脚本日志）
+
+`deploy-pve.sh` 里 `npm ... | tail` 会**吞掉退出码** → install/build 失败也照样 restart，
+留下「package.json 是 0.7.33、`dist/server/index.js` 还是旧产物」的僵尸状态。部署后逐台核：
+
+```bash
+git rev-parse --short HEAD                      # 应为 sync 最新 commit
+node -e "console.log(require('./package.json').version)"
+stat -c '%y' dist/server/index.js               # ★ mtime 必须是刚构建的！旧=构建失败
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8648
+```
+
+**`dist` mtime 是旧的 = 服务在跑旧代码**，必须重装依赖重构建。
+
 ---
 
 ## 4.5 浏览器端功能验收（升级后必做）
@@ -356,6 +384,11 @@ tasklist | grep -i "Ekko Studio"
 | 构建报 `No Python at '../base\python.exe'` | Hermes runtime 的 `python/venv/pyvenv.cfg` 里 `home` 是相对路径，改绝对路径 |
 | opencode 组无模型 | Hermes runtime < 0.20.6，需升级 runtime |
 | 桌面路径搞错 | 桌面永远是 `d:\desk` |
+| VM `931`/`961` SSH 连不上 | VM 很可能 **stopped** → `ssh PVE "qm list"` 确认 → `qm start 931` / `qm start 961` |
+| PVE 构建报 `Cannot find module 'werift'` / `p2p.ts TS7006` | 依赖没装全 → 按第 4 节统一 npm 源+代理后 `npm install` |
+| PVE 部署"成功"但功能没变 | `dist/server/index.js` mtime 是旧的 = 构建其实失败（脚本被 `| tail` 吞了退出码）→ 重装依赖重构建 |
+| `node scripts/verify-fleet.mjs` 报 `require is not defined in ES module scope` | 脚本 `.mjs` 却用 `require` → `cp scripts/verify-fleet.mjs .vfy-tmp.cjs && node .vfy-tmp.cjs`，跑完删 |
+| 验收报 `ECONNREFUSED 127.0.0.1:9222` | Chrome CDP 必须与脚本**同一条命令内**启动（见 4.5） |
 
 ---
 
