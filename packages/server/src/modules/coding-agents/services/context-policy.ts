@@ -27,7 +27,9 @@ export async function codingAgentContextPolicy(input: {
 }
 
 function clampOutputLimit(outputLimit: number | undefined, contextWindow: number): number {
-  return Math.max(1, Math.min(Math.floor(outputLimit || 8192), contextWindow - 1))
+  // Cap at 384000: SenseNova (商汤) rejects max_tokens above this. models.dev
+  // metadata (e.g. empiriolabs) can overstate outputLimit for deepseek models.
+  return Math.max(1, Math.min(Math.floor(outputLimit || 8192), contextWindow - 1, 384_000))
 }
 
 /** Synchronous model output budget for proxies that must fill a required max_tokens.
