@@ -179,9 +179,59 @@ def _set_path_env(agent_root: str | None, hermes_home: str | None) -> None:
     _ORIGINAL_SET_PATH_ENV(agent_root, hermes_home)
 
 
+def _apply_always_eager_toolsets() -> None:
+    """Keep per-turn task-card MCP tools resident (never deferred).
+
+    Deferred MCP tools need tool_search -> tool_describe -> tool_call each
+    turn, which is slow and occasionally surfaces a "does not exist" wall
+    mid-turn. The ekko-studio-interaction toolset ships with this desktop
+    app, so its tools (update_plan/clarify) must be in the model-facing
+    list from session start.
+
+    Lives in the Studio bridge layer (distributed with this package), so it
+    applies on any machine regardless of which Hermes runtime version Studio
+    downloads. Handles both runtime shapes:
+      - 0.20.x: module-level ``_ALWAYS_EAGER_MCP_TOOLSETS`` whitelist.
+      - 0.21.x: ``is_deferrable_tool_name(name, defer_tools)`` signature.
+    """
+    try:
+        from tools import tool_search as _tool_search
+    except Exception:
+        return  # runtime not importable yet; nothing to patch
+
+    _eager_toolsets = frozenset({"mcp-ekko-studio-interaction"})
+
+    # 1) 0.20.x shape: inject the whitelist constant the module already reads.
+    try:
+        _existing = getattr(_tool_search, "_ALWAYS_EAGER_MCP_TOOLSETS", frozenset())
+        _tool_search._ALWAYS_EAGER_MCP_TOOLSETS = frozenset(_existing) | _eager_toolsets
+    except Exception:
+        pass
+
+    # 2) All shapes: wrap is_deferrable_tool_name so any tool whose registry
+    #    entry belongs to an eager toolset is never deferred.
+    try:
+        _orig_is_deferrable = _tool_search.is_deferrable_tool_name
+
+        def _patched_is_deferrable(name, *args, **kwargs):
+            try:
+                from tools.registry import registry as _registry
+                _entry = _registry.get_entry(name)
+                if _entry is not None and _entry.toolset in _eager_toolsets:
+                    return False
+            except Exception:
+                pass
+            return _orig_is_deferrable(name, *args, **kwargs)
+
+        _tool_search.is_deferrable_tool_name = _patched_is_deferrable
+    except Exception:
+        pass
+
+
 def _ensure_agent_imports() -> None:
     _sync_runtime_patches()
     _ORIGINAL_ENSURE_AGENT_IMPORTS()
+    _apply_always_eager_toolsets()
 
 
 def _start_parent_process_watchdog(

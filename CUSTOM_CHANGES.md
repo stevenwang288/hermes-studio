@@ -9,11 +9,11 @@
 
 | 分支 | 版本 | 说明 |
 |------|------|------|
-| `sync` | **0.7.34** | 唯一有效分支。= 上游 `main` 最新 + 6 项自研功能，已通过 `npm run build` + 桌面 `tsc --noEmit` + 本地打包验证 |
+| `sync` | **0.7.34** | 唯一有效分支。= 上游 `main` 最新 + 7 项自研功能，已通过 `npm run build` + 桌面 `tsc --noEmit` + 本地打包验证 |
 
 **最近一次合并（2026-10-13）**：上游 0.7.33 → 0.7.34 共 15 个提交（编程 Agent 原生模型选择/记忆已选配置 #3354/#3360、统一模型选择弹窗 #3355、用量概览账号/Profile 筛选 #3363、用量精度/趋势图修复 #3373、**桌面远程服务器模式** #3366、Turkish locale #3338、MCP 继承 token 修复 #3359、思考标签混入正文 #3365 等）。**0 个文件冲突，干净 merge**，但上游 6 个自研重叠文件改动量大（chat-run.ts -142 / chat.ts -186 / ChatPanel.vue -664 / ChatInput.vue -103 / desktop-browser.ts / context-policy.ts），git 三方合并自动保留全部自研（上游从未有过 preempt 代码 → 我们 fork 的行当"新增"保留），逐项 grep 确认 6 项自研完整存活：
 - ① 消息队列：服务端 `preempt`/`run.promote`/`run.promote_all`（合并放行综合指令模板一字未损）+ 前端 Ctrl+Enter/ESC 全部保留，**且上游官方 `insert_queued_run`（打断当前 turn + 提队首执行）机制也并入** —— 双链路并存，未来可评估迁移到官方机制进一步降低冲突
-- ② 桌面缩放 `[zoom patch]` ✅、③ 路径完整显示 workspace-badge ✅、④ 链接默认系统浏览器 `DEFAULT_LINK_OPEN_TARGET='default-browser'` ✅、⑤ 微信扫码 DM 策略 ✅、⑥ 流式 tool_calls 空串修复 ✅
+- ② 桌面缩放 `[zoom patch]` ✅、③ 路径完整显示 workspace-badge ✅、④ 链接默认系统浏览器 `DEFAULT_LINK_OPEN_TARGET='default-browser'` ✅、⑤ 微信扫码 DM 策略 ✅、⑥ 流式 tool_calls 空串修复 ✅、⑦ update_plan/task 卡 MCP 常驻（bridge 层）✅
 - `context-policy.ts` 唯一交叉区：上游重构为 `clampOutputLimit()` 函数，**取上游新结构 + 384000 cap（商汤）重新应用进函数体**（一处修改全调用点生效）
 - 本地 `npm run build` + 桌面 `tsc --noEmit` 均通过。git stash 的 openapi.json 旧改动未恢复（上游已重新生成，符合惯例）
 
@@ -51,7 +51,7 @@
 
 ---
 
-## 保留的自研功能（6 项）
+## 保留的自研功能（7 项）
 
 ### 1. 消息队列
 
@@ -103,6 +103,16 @@
 |------|------|
 | `packages/ekko-agent/src/model/providers/openai-compatible.ts` | 流式增量里后续分片可能带**空字符串** `id`/`name`（DeepSeek V4.1/商汤实测），原 `?? current.id` 只在 null/undefined 时保留、**空串会覆盖**首分片的完整值 → `invalid_tool_call`。改为 `\|\|` 只在有值时更新。作用：修好这两个模型的工具调用报错 |
 | 测试 | `tests/ekko-agent/model-request.test.ts` |
+
+### 7. update_plan/任务卡 MCP 工具常驻（bridge 层补丁，2026-10-13 新增）
+
+| 文件 | 改动 |
+|------|------|
+| `packages/server/src/modules/hermes/services/bridge/python/hermes_bridge.py` | `_ensure_agent_imports()` 后新增 `_apply_always_eager_toolsets()`：①向运行时 `tools/tool_search` 注入 `_ALWAYS_EAGER_MCP_TOOLSETS = {"mcp-ekko-studio-interaction"}`（兼容 0.20.x 白名单式）；②包装 `is_deferrable_tool_name()` 使该 toolset 永不被延迟（兼容 0.21.x `defer_tools` 签名式）。作用：update_plan/clarify（任务卡工具）会话一开始就加载好，不走 `tool_search→tool_describe→tool_call` 三步，杜绝中途 "does not exist" |
+
+**为什么放 bridge 层而不是改运行时**：改 `desktop-runtime/hermes/<ver>/win-x64/python/tools/tool_search.py` 只对本机生效——新机器装 Studio 下载的是干净官方运行时，Studio 升级下载新版运行时补丁也会丢。bridge 层是 Studio 自带代码（agent 启动必经 `python hermes_bridge.py`），随包分发 → 任何机器任何版本都带。**后续升级 merge 时此文件按自研保留**（bridge 目录上游几乎不动）。
+
+**验证**：干净运行时（0.20.0，无任何补丁）实测：补丁执行后 `_ALWAYS_EAGER_MCP_TOOLSETS` 注入成功、`is_deferrable_tool_name` 被包装。961（0.21.5 新版结构）同款语义。
 
 ---
 

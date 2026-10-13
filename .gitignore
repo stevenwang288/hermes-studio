@@ -66,3 +66,6 @@ packages/client/src/**/*.js
 .playwright-mcp/
 dist.old-*/
 NUL
+# 本地运维备份/密钥操作产物
+.hermes-ops/
+*.bak-*

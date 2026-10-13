@@ -10,7 +10,7 @@
 
 `stevenwang288/hermes-studio` = 上游 `EKKOLearnAI/hermes-studio` 的 fork。
 
-- 以官方基线为底，**只保留 4 项自研功能**，其余一律跟随上游（品牌/图标/安装路径都是官方的，不做 fork 标记）
+- 以官方基线为底，**只保留 7 项自研功能**，其余一律跟随上游（品牌/图标/安装路径都是官方的，不做 fork 标记）
 - **唯一有效分支：`sync`**。`main` 是废弃的旧基线，不要用
 - 部署到 **5 个终端**：4 台 PVE 虚拟机 + 1 台 Windows 桌面版
 
@@ -63,7 +63,7 @@ cd packages/desktop && npx tsc -p tsconfig.json --noEmit
 git grep -c "preempt" HEAD -- packages/server/src/modules/studio/sockets/chat-run.ts
 git grep -c "loadDesktopZoomLevel" HEAD -- packages/desktop/src/main/index.ts
 git grep -c "promoteQueuedMessage" HEAD -- packages/client/src/stores/hermes/chat.ts
-git diff --stat upstream/main..sync    # 应只有 10 个源码文件 + CUSTOM_CHANGES.md + .gitignore
+git diff --stat upstream/main..sync    # 应只有 ~11 个自研源码文件 + CUSTOM_CHANGES.md + .gitignore（含 bridge/python/hermes_bridge.py）
 ```
 
 ### 第 3 步 · 推 GitHub
@@ -109,7 +109,7 @@ node scripts/verify-fleet.mjs 935      # 单台
 
 ---
 
-## 3. 6 项自研功能（冲突时保留，别弄丢）
+## 3. 7 项自研功能（冲突时保留，别弄丢）
 
 | # | 功能 | 主要文件 |
 |---|------|----------|
@@ -119,6 +119,7 @@ node scripts/verify-fleet.mjs 935      # 单台
 | 4 | **链接默认用 Chrome 打开 + 内置浏览器错位修复**（2026-10-02）：点 URL 不再进内置 WebContentsView（指纹/登录态/代理硬伤），优先 `spawn` 系统 Chrome；`setViewport` 乘 zoomFactor 修复字体缩放后内嵌浏览器错位 | `client/src/utils/desktop-browser.ts`<br>`desktop/src/main/browser/browser-manager.ts`<br>`desktop/src/main/index.ts` |
 | 5 | **微信扫码保存自动开 DM 策略**（2026-10-03）：扫码保存凭据时额外写 `WEIXIN_DM_POLICY=open` + `WEIXIN_ALLOW_ALL_USERS=true`，新 bot 开箱即用不被 pairing 策略拒 | `server/src/modules/hermes/controllers/weixin.ts` |
 | 6 | **流式 tool_calls 空串覆盖修复**（2026-10-10）：DeepSeek V4.1/商汤的流式分片会带空串 `id`/`name`，`??` 会让空串覆盖首分片 → `invalid_tool_call`；改用 `\|\|` 只在有值时更新 | `packages/ekko-agent/src/model/providers/openai-compatible.ts` |
+| 7 | **update_plan/任务卡 MCP 工具常驻**（2026-10-13）：bridge 层 `_apply_always_eager_toolsets()` 向运行时注入 `_ALWAYS_EAGER_MCP_TOOLSETS`（0.20.x 白名单式）+ 包装 `is_deferrable_tool_name`（0.21.x defer_tools 式），ekko-studio-interaction toolset 永不延迟。**放 bridge 层 = 随包分发，换机器/升级运行时不丢** | `server/src/modules/hermes/services/bridge/python/hermes_bridge.py` |
 
 测试：`tests/server/chat-run-promote.test.ts`
 
