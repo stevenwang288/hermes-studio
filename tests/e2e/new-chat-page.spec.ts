@@ -116,9 +116,9 @@ for (const mobile of [false, true]) test(`new chat uses cards and the existing c
   await settings.getByRole('button', { name: 'Close', exact: true }).click()
   await expect(settings).toBeHidden()
   await draft.locator('.input-model-button').click()
-  const models = page.getByRole('dialog').filter({ hasText: 'Set Session Model' })
-  await expect(models.locator('.session-model-list')).toContainText('Test Provider')
-  await models.locator('.session-model-search input').focus()
+  const models = page.locator('.model-cascader:visible')
+  await expect(models.locator('.model-cascader-columns')).toContainText('Test Provider')
+  await models.locator('.model-cascader-search input').focus()
   await page.keyboard.press('Escape')
   await expect(models).toBeHidden()
   await expect(draft).toBeVisible()
@@ -212,6 +212,67 @@ test('Agent cards stop dragging after a fast exit and mouse release outside the 
   expect(await viewport.evaluate(el => el.scrollLeft)).toBe(draggedLeft)
   await selectNewChatAgent(page, 'Codex')
   await expect(page.locator('.agent-card.active')).toHaveAttribute('data-agent', 'codex')
+})
+
+for (const loop of [false, true]) test(`Agent cards support vertical and horizontal wheels (${loop ? 'looping' : 'finite'} row)`, async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await mockHermesApi(page)
+  await mockChatSocket(page)
+  await page.route('**/api/agents/availability', route => route.fulfill({ json: {
+    revision: 1, updatedAt: new Date().toISOString(), agents: (loop ? catalog.agents : catalog.agents.slice(0, 4))
+      .map(agent => ({ id: agent.id, installed: true, source: 'user-cli' })),
+  } }))
+  await page.goto('/#/hermes/chat')
+  await page.getByRole('button', { name: 'New Chat', exact: true }).click()
+  const active = page.locator('.agent-card.active')
+  const viewport = page.locator('.agent-card-viewport')
+  await expect(active).toHaveAttribute('data-agent', 'ekko-agent')
+  const step = await viewport.locator('.agent-card-slot').evaluateAll(slots =>
+    (slots[1] as HTMLElement).offsetLeft - (slots[0] as HTMLElement).offsetLeft)
+  const pageScroll = await page.locator('.new-chat-page').evaluate(el => el.scrollTop)
+  await viewport.hover()
+  await page.mouse.wheel(0, step)
+  await expect(active).toHaveAttribute('data-agent', 'hermes')
+  await page.mouse.wheel(0, -step)
+  await expect(active).toHaveAttribute('data-agent', 'ekko-agent')
+  await page.mouse.wheel(step, 0)
+  await expect(active).toHaveAttribute('data-agent', 'hermes')
+  expect(await page.locator('.new-chat-page').evaluate(el => el.scrollTop)).toBe(pageScroll)
+  if (loop) {
+    await selectNewChatAgent(page, catalog.agents.at(-1)!.name)
+    await expect.poll(() => viewport.evaluate(el => {
+      const active = el.querySelector('.agent-card.active')!
+      const card = active.parentElement as HTMLElement
+      return Math.abs(el.scrollLeft - (card.offsetLeft + card.offsetWidth / 2 - el.clientWidth / 2))
+    })).toBeLessThanOrEqual(1)
+    await viewport.hover()
+    await page.mouse.wheel(0, step)
+    await expect(active).toHaveAttribute('data-agent', 'ekko-agent')
+    await page.mouse.wheel(0, -step)
+    await expect(active).toHaveAttribute('data-agent', catalog.agents.at(-1)!.id)
+  }
+})
+
+for (const brightness of ['light', 'dark'] as const) test(`Agent card edges fade transparently over a custom background (${brightness})`, async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await page.addInitScript(mode => localStorage.setItem('hermes_brightness', mode), brightness)
+  await mockHermesApi(page, { theme: { background: { name: 'cards-background.svg', mime: 'image/svg+xml', updatedAt: 101 } } })
+  await mockChatSocket(page)
+  await page.route('**/api/theme/background*', route => route.fulfill({
+    contentType: 'image/svg+xml',
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1000"><defs><linearGradient id="bg"><stop stop-color="#305181"/><stop offset=".5" stop-color="#b06c85"/><stop offset="1" stop-color="#d9aa70"/></linearGradient></defs><path fill="url(#bg)" d="M0 0h1440v1000H0z"/><path fill="none" stroke="#fff" stroke-opacity=".3" stroke-width="50" d="M0 900 1000 0M400 1000 1400 0"/></svg>',
+  }))
+  await page.goto('/#/hermes/chat')
+  await page.getByRole('button', { name: 'New Chat', exact: true }).click()
+  await expect(page.locator('html')).toHaveClass(/theme-has-custom-background/)
+  const viewport = page.locator('.agent-card-viewport')
+  await expect(viewport).toHaveCSS('mask-image', /linear-gradient\(90deg, rgba\(0, 0, 0, 0\), rgb\(0, 0, 0\) 70px/)
+  await expect(viewport).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(page.locator('.agent-card-side-fade')).toHaveCount(0)
+  await expect(page.locator('.agent-card.active')).toHaveAttribute('data-agent', 'ekko-agent')
+  await page.screenshot({ path: `/tmp/studio-agent-cards-background-${brightness}.png`, animations: 'allow' })
 })
 
 test('Agent cards support keyboard selection and continuous scrolling in dark mode', async ({ page }) => {
@@ -409,19 +470,24 @@ test('new chat shares the session model picker and sends the chosen model and pr
   const draft = page.locator('.new-chat-page')
   await draft.locator('textarea').fill('Use the model I selected')
   await draft.locator('.input-model-button').click()
-  const models = page.getByRole('dialog').filter({ hasText: 'Set Session Model' })
-  await expect(models.locator('[name="session-model-kind"]')).toHaveCount(0)
-  await models.locator('.session-model-search input').fill('other')
-  await expect(models.locator('.session-model-group-label')).toHaveText('Other Provider')
-  await models.locator('.session-model-search input').fill('disabled')
-  const disabled = models.locator('.session-model-item').filter({ hasText: 'disabled-model' })
+  const models = page.locator('.model-cascader:visible')
+  await expect(models.locator('.model-cascader-provider').filter({ hasText: 'MoA combinations' })).toHaveCount(0)
+  await models.locator('.model-cascader-search input').fill('other')
+  await expect(models.locator('.model-cascader-provider > span:first-child')).toHaveText('Other Provider')
+  await models.locator('.model-cascader-search input').fill('disabled')
+  const disabled = models.locator('.model-cascader-item').filter({ hasText: 'disabled-model' })
   await expect(disabled).toHaveAttribute('aria-disabled', 'true')
-  await disabled.click()
+  await disabled.click({ force: true })
   await expect(page.getByRole('dialog').filter({ hasText: 'Protocol' })).toBeHidden()
-  await models.locator('.session-model-search input').fill('other-model')
-  await models.locator('.session-model-item').filter({ hasText: 'other-model' }).click()
+  await models.locator('.model-cascader-search input').fill('other-model')
+  await models.locator('.model-cascader-item').filter({ hasText: 'other-model' }).click()
   const protocol = page.getByRole('dialog').filter({ hasText: 'Protocol' })
   await expect(protocol).toContainText('Anthropic Messages')
+  await protocol.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(protocol).toBeHidden()
+  await expect(models.locator('.model-cascader-search input')).toHaveValue('other-model')
+  await expect(draft.locator('.input-model-button')).toContainText('test-model')
+  await models.locator('.model-cascader-item').filter({ hasText: 'other-model' }).click()
   await protocol.getByRole('button', { name: 'Confirm', exact: true }).click()
   await expect(models).toBeHidden()
   await expect(draft.locator('.input-model-button')).toContainText('other-model')
@@ -433,22 +499,23 @@ test('new chat shares the session model picker and sends the chosen model and pr
   })
   // The same picker still works for the newly created conversation.
   await page.locator('.input-model-button').click()
-  await expect(models.locator('.session-model-item.active')).toContainText('other-model')
+  await expect(models.locator('.model-cascader-item.active')).toContainText('other-model')
   await expect(models).toContainText('Test Provider')
-  await models.locator('.session-model-item').filter({ hasText: 'test-model' }).click()
+  await models.locator('.model-cascader-provider').filter({ hasText: 'Test Provider' }).click()
+  await models.locator('.model-cascader-item').filter({ hasText: 'test-model' }).click()
   await protocol.getByRole('button', { name: 'Confirm', exact: true }).click()
   await expect(models).toBeHidden()
   await expect(page.locator('.input-model-button')).toContainText('test-model')
   expect(api.unexpectedRequests).toEqual([])
 })
 
-for (const choice of ['standard', 'custom', 'moa'] as const) test(`Hermes draft uses the shared ${choice} model selection without changing the existing conversation`, async ({ page }) => {
+for (const choice of ['standard', 'custom', 'moa'] as const) test(`Hermes draft uses the shared ${choice === 'custom' ? 'saved custom' : choice} model selection without changing the existing conversation`, async ({ page }) => {
   const session = { id: 'existing-model-chat', title: 'Existing conversation', source: 'cli', profile: 'research', model: 'test-model', provider: 'test-provider', started_at: 100, last_active: 101, message_count: 0 }
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   await page.addInitScript(id => {
     (window as any).__PW_CHAT_SOCKET_RESUMES__ = { [id]: { session_id: id, messages: [], isWorking: false, messageLoadedCount: 0, messageTotal: 0 } }
   }, session.id)
-  const api = await mockHermesApi(page, { sessions: [session], modelGroups: [
+  const api = await mockHermesApi(page, { sessions: [session], customModels: { 'test-provider': ['custom-model'] }, modelGroups: [
     { ...TEST_MODEL_GROUP, models: ['test-model', 'other-model'] }, { provider: 'moa', label: 'MoA', models: ['ensemble'] },
   ] })
   await mockChatSocket(page)
@@ -465,17 +532,17 @@ for (const choice of ['standard', 'custom', 'moa'] as const) test(`Hermes draft 
     await page.keyboard.press('Escape')
   }
   await draft.locator('.input-model-button').click()
-  const models = page.getByRole('dialog').filter({ hasText: 'Set Session Model' })
-  await expect(models.locator('[name="session-model-kind"]')).toHaveCount(2)
+  const models = page.locator('.model-cascader:visible')
+  await expect(models.locator('.model-cascader-provider').filter({ hasText: 'MoA combinations' })).toHaveCount(1)
   if (choice === 'custom') {
-    await models.locator('.session-model-custom-input input').fill('custom-model')
-    await models.locator('.session-model-custom-input input').press('Enter')
+    await expect(models.getByRole('textbox')).toHaveCount(1)
+    await models.getByRole('menuitemradio').filter({ hasText: 'custom-model' }).click()
   } else if (choice === 'moa') {
     await models.getByText('MoA combinations', { exact: true }).click()
-    await models.locator('.session-model-item').filter({ hasText: 'ensemble' }).click()
+    await models.locator('.model-cascader-item').filter({ hasText: 'ensemble' }).click()
   } else {
-    await models.locator('.session-model-search input').fill('other-model')
-    await models.locator('.session-model-item').filter({ hasText: 'other-model' }).click()
+    await models.locator('.model-cascader-search input').fill('other-model')
+    await models.locator('.model-cascader-item').filter({ hasText: 'other-model' }).click()
   }
   await expect(models).toBeHidden()
   const model = choice === 'custom' ? 'custom-model' : choice === 'moa' ? 'ensemble' : 'other-model'

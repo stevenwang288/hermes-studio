@@ -65,6 +65,8 @@ interface MockHermesApiOptions {
   channelCredentials?: boolean
   channelConfig?: Record<string, unknown>
   providerEditor?: Record<string, unknown>
+  modelAliases?: Record<string, Record<string, string>>
+  customModels?: Record<string, string[]>
   modelGroups?: Array<{
     provider: string
     label: string
@@ -214,6 +216,18 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
 
     if (pathname === '/health') {
       await route.fulfill(jsonResponse({ status: 'ok', webui_version: '0.5.23', node_version: '23.0.0' }))
+      return
+    }
+
+    if (pathname === '/api/studio/usage/stats' && request.method() === 'GET') {
+      await route.fulfill(jsonResponse({
+        period_days: Number(url.searchParams.get('days') || 30),
+        total_input_tokens: 0, total_output_tokens: 0, total_cache_read_tokens: 0,
+        total_cache_write_tokens: 0, total_reasoning_tokens: 0, total_sessions: 0,
+        total_api_calls: 0, total_cost: 0, cost_coverage: { reported: 0, estimated: 0, unknown: 0 },
+        filter_options: { accounts: [], models: [], agents: [] },
+        model_usage: [], agent_usage: [], daily_usage: [],
+      }))
       return
     }
 
@@ -706,7 +720,8 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
           default_provider: defaultGroup?.provider || '',
           groups,
         })),
-        model_aliases: {},
+        model_aliases: options.modelAliases || {},
+        custom_models: options.customModels || {},
         model_visibility: {},
       }))
       return
@@ -945,6 +960,12 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
     }
     if (pathname === '/api/coding-agents' && request.method() === 'GET') {
       await route.fulfill(jsonResponse({ tools: [] }))
+      return
+    }
+    if (pathname === '/api/coding-agents/models' && request.method() === 'GET') {
+      const agentId = new URL(request.url()).searchParams.get('agent') || 'codex'
+      await route.fulfill(jsonResponse({ agents: [{ agentId, name: agentId, status: 'empty', source: 'cli', scope: 'available',
+        models: [], checkedAt: new Date().toISOString(), cached: false }] }))
       return
     }
 
