@@ -9,9 +9,13 @@
 
 | 分支 | 版本 | 说明 |
 |------|------|------|
-| `sync` | **0.7.33** | 唯一有效分支。= 上游 `main` 最新 + 6 项自研功能，已通过 `npm run build` + 桌面 `tsc --noEmit` 验证 |
+| `sync` | **0.7.34** | 唯一有效分支。= 上游 `main` 最新 + 6 项自研功能，已通过 `npm run build` + 桌面 `tsc --noEmit` + 本地打包验证 |
 
-**最近一次合并（2026-10-10）**：上游 0.7.32 → 0.7.33 共 11 个提交（重做「新建聊天」页：drawer → 响应式 Agent 卡片 `NewChatAgentCards.vue`；上下文压缩/用量统计修复 `handle-bridge-run.ts`/`context-compressor`；token BPE 二次复杂度防护；ACP 管道容忍依赖 stdout 噪声；移动端导航抽屉宽度）。**0 个文件冲突，干净 merge**；仅 3 个文件与自研重叠（`ChatInput.vue`/`ChatPanel.vue`/`stores/hermes/chat.ts`），git 自动合并后逐项 grep 确认 6 项自研全部保留。本地 `npm run build` + 桌面 `tsc --noEmit` 均通过。
+**最近一次合并（2026-10-13）**：上游 0.7.33 → 0.7.34 共 15 个提交（编程 Agent 原生模型选择/记忆已选配置 #3354/#3360、统一模型选择弹窗 #3355、用量概览账号/Profile 筛选 #3363、用量精度/趋势图修复 #3373、**桌面远程服务器模式** #3366、Turkish locale #3338、MCP 继承 token 修复 #3359、思考标签混入正文 #3365 等）。**0 个文件冲突，干净 merge**，但上游 6 个自研重叠文件改动量大（chat-run.ts -142 / chat.ts -186 / ChatPanel.vue -664 / ChatInput.vue -103 / desktop-browser.ts / context-policy.ts），git 三方合并自动保留全部自研（上游从未有过 preempt 代码 → 我们 fork 的行当"新增"保留），逐项 grep 确认 6 项自研完整存活：
+- ① 消息队列：服务端 `preempt`/`run.promote`/`run.promote_all`（合并放行综合指令模板一字未损）+ 前端 Ctrl+Enter/ESC 全部保留，**且上游官方 `insert_queued_run`（打断当前 turn + 提队首执行）机制也并入** —— 双链路并存，未来可评估迁移到官方机制进一步降低冲突
+- ② 桌面缩放 `[zoom patch]` ✅、③ 路径完整显示 workspace-badge ✅、④ 链接默认系统浏览器 `DEFAULT_LINK_OPEN_TARGET='default-browser'` ✅、⑤ 微信扫码 DM 策略 ✅、⑥ 流式 tool_calls 空串修复 ✅
+- `context-policy.ts` 唯一交叉区：上游重构为 `clampOutputLimit()` 函数，**取上游新结构 + 384000 cap（商汤）重新应用进函数体**（一处修改全调用点生效）
+- 本地 `npm run build` + 桌面 `tsc --noEmit` 均通过。git stash 的 openapi.json 旧改动未恢复（上游已重新生成，符合惯例）
 
 **2026-10-10 部署记录**：4 台 PVE（931/935/936/961）全部升级 **0.7.33**（commit `02ad300e`），逐台核对 `dist/server/index.js` 为新构建 + `curl 8648` 4/4 HTTP 200；**浏览器端验收（发加法题 AI 答对）4/4 通过**。踩坑（都已写进 MAINTAIN.md 第 4 节与故障速查）：
 - **元凶是 npm 源/代理四台不统一**：936 出厂 `registry.npmjs.org`（拉不到包 → 缺 `werift@0.24.4` → build `TS2307`）；935 连 npmmirror 直连也不通，必须挂 7890 代理。统一为 `registry.npmmirror.com` + `proxy/https-proxy=127.0.0.1:7890`。
