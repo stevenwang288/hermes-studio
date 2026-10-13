@@ -17,6 +17,13 @@
 - `context-policy.ts` 唯一交叉区：上游重构为 `clampOutputLimit()` 函数，**取上游新结构 + 384000 cap（商汤）重新应用进函数体**（一处修改全调用点生效）
 - 本地 `npm run build` + 桌面 `tsc --noEmit` 均通过。git stash 的 openapi.json 旧改动未恢复（上游已重新生成，符合惯例）
 
+**2026-10-13 961 部署记录**：961 已升级 **0.7.34**（commit `2f67a011`，`git fetch origin sync && git reset --hard origin/sync` + build + `systemctl restart hermes-studio hermes-gateway`），四步验证 + 端到端测试全绿：
+- 服务状态 active ×2 + `webui_version=0.7.34` + node v24.20.0 进程 + 8648 LISTEN
+- **socket 协议实测**（短 prompt 快发，不烧 token）：3 条排队 qlen 1→2→3 ✅；`run.promote` 打断立即执行 + `dequeued_queue_id` 权威回传 ✅；自动出队串行 ✅；`run.promote_all` 合并成 `merge_xxx` 单条（综合指令模板生效）✅；误用 provider 名时失败路径不卡队列 ✅；一次 429（961:4010 网关 tpm/rpm 限流，非代码问题）恢复后单发正常 ✅
+- **浏览器 UI 验收**（verify-fleet 加法题）：`42 + 16 = 58` AI 答对 ✅（29.9s）
+- **UI 队列交互实测**（Chrome CDP + playwright-core）：队列浮层「消息队列」出现 ✅；`.queue-promote` 按钮点击 → 消息作为用户气泡进主列表 ✅；**Ctrl+Enter 放行生效** ✅；`.queue-remove` 移除生效 ✅；队列最终全部消费归零（assistant 累计 9+ 条）✅
+- 961 的 provider 名实测为「商汤」（base_url 指 961:4010），不是配置文件里的 `custom:192.168.9.61:4010` 字面量
+
 **2026-10-10 部署记录**：4 台 PVE（931/935/936/961）全部升级 **0.7.33**（commit `02ad300e`），逐台核对 `dist/server/index.js` 为新构建 + `curl 8648` 4/4 HTTP 200；**浏览器端验收（发加法题 AI 答对）4/4 通过**。踩坑（都已写进 MAINTAIN.md 第 4 节与故障速查）：
 - **元凶是 npm 源/代理四台不统一**：936 出厂 `registry.npmjs.org`（拉不到包 → 缺 `werift@0.24.4` → build `TS2307`）；935 连 npmmirror 直连也不通，必须挂 7890 代理。统一为 `registry.npmmirror.com` + `proxy/https-proxy=127.0.0.1:7890`。
 - **`deploy-pve.sh` 的 `npm ... | tail` 吞退出码** → 935/936 表面"完成"、实则 build 失败，服务重启后**跑的是上个版本的旧 dist**（package.json 却是 0.7.33）。**部署后必须核对 `dist` mtime**。
