@@ -22,7 +22,7 @@
  *   3. 检测回复必须只读"新增的 div.message.assistant"，否则会被历史消息里的数字误判
  */
 
-const { chromium } = require('playwright-core');
+import { chromium } from 'playwright-core';
 
 const VMS = [
   { id: '931', url: 'http://192.168.9.31:8648', dir: '/opt/hermes-studio-ekko' },
