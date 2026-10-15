@@ -1,7 +1,9 @@
 # 本仓库说明
 
-> **维护规则看 [`MAINTAIN.md`](MAINTAIN.md)** —— 上游更新时该做什么、4 台 PVE 怎么升级、Windows 安装程序放哪，全在里面。
+> **动手时照 [`SYNC-CHECKLIST.md`](SYNC-CHECKLIST.md) 走**（10 步打勾，最后跑 `node scripts/delivery-verify.mjs` 终检）。
+> **维护规则与坑的原理看 [`MAINTAIN.md`](MAINTAIN.md)** —— 上游更新时该做什么、4 台 PVE 怎么升级、Windows 安装程序放哪，全在里面。
 > **详细手册看 [`docs/upstream-sync-and-fleet-deploy.md`](docs/upstream-sync-and-fleet-deploy.md)**。
+> 本文件负责：自研功能清单 + **每轮记账**。
 
 本仓库是 `EKKOLearnAI/hermes-studio` 的 fork，**2026-09-16 全新重建**：以官方 v0.7.21 为基线，只合入自研功能，版本号跟随官方（不做 fork 标记，避免启动提示）。
 
@@ -10,6 +12,12 @@
 | 分支 | 版本 | 说明 |
 |------|------|------|
 | `sync` | **0.7.35** | 唯一有效分支。= 上游 `main` 最新 + 7 项自研功能，已通过 `npm run build` + 桌面 `tsc --noEmit` 验证 |
+| `main` | 0.7.21 | 停用的旧基线，**勿用** |
+
+**流程固化（2026-10-15）**：新增 [`SYNC-CHECKLIST.md`](SYNC-CHECKLIST.md)（10 步执行清单，把「推自己的 GitHub」「更新文档记账」两步显式列为不可跳过）+
+`scripts/delivery-verify.mjs`（9 项终检，一项 FAIL 就不算完成）+ `scripts/sync-fleet-head.sh`（只同步 4 台 git 指针，解决「部署后又记账 → PVE HEAD 漂移」）。
+首跑终检即抓出真问题：4 台停在 `c41c75c1` 而仓库已是 `cbd5d44e`（记账提交所致，运行时未变）。
+
 
 **最近一次合并（2026-10-15）**：上游 0.7.34 → 0.7.35 共 6 个提交（Agent 卡片思考头像过渡动画 #3378/#3386、显示费用开关修复+Edge TTS 接口更新 #3381、会话删除/归档/未读跨设备同步 #3380、Ekko 自定义 Anthropic 地址路径拼接 #3384、Anthropic 兼容请求按模型输出上限设置 #3334）。**0 个文件冲突，干净 merge**（merge-tree 预演 0 冲突标记；4 个双方改文件 package-lock.json / ChatPanel.vue / MessageList.vue / model-request.test.ts 改动互不重叠全部自动合并）。逐项 grep 确认 8 项自研完整存活（①preempt×9/promote_all ②zoom patch ③workspace-badge ④default-browser+findChromeExecutable ⑤WEIXIN_DM_POLICY ⑥`|| current.id` ⑦_ALWAYS_EAGER×3 ⑧384000 cap）。`git diff upstream/main..sync` 圈定：16 个自研源码文件 + 运维资产，无夹带。本地 `npm run build` + 桌面 `tsc --noEmit` 均通过。
 
@@ -46,7 +54,6 @@
 - **`scripts/verify-fleet.mjs` 有 bug**（`.mjs` 用 `require`）→ 临时 `cp` 成 `.cjs` 才跑通；**待修**。
 
 **2026-10-08 决策：桌面版打包从 GitHub Actions 云编译改为本地打包**（用户拍板）。原因：云编译下载 artifact 慢且易断（直连 33KB/s 超时、代理断流 139MB，实测两次失败才续传成功），本地打包一条命令 10-26 分钟出 exe 且天然对应本地 commit。**本地打包铁律：打包前必须根目录 `npm prune --omit=dev`**（不 prune 会把 937MB dev 依赖塞进 webui/node_modules，exe 从 198MB 膨胀到 321MB），打完后 `npm install --include=dev` 恢复（否则 vue-tsc 等 dev 工具消失）。产物 3 个：`Ekko.Studio-<ver>-x64.exe` + `.blockmap` + `latest.yml`；但**桌面 `d:\desk` 只放 exe**（2026-10-10 大哥定）—— `.blockmap`/`latest.yml` 是 electron-updater 差分更新用的，本 fork 不发布更新服务器（`app-update.yml` 指向的是上游 `download.ekkolearnai.com`），放桌面无用，留在 `packages/desktop/release/` 即可。命令：`cd packages/desktop && npm ci --include=dev && npm run dist:win`（首次自动下 electron 二进制，需代理 10808）。本地实测 exe 198MB 与云端 195MB 一致。
-| `main` | 0.7.21 | 停用的旧基线，**勿用** |
 
 **最近一次合并（2026-10-03）**：上游 0.7.27 → 0.7.29 共 11 个提交（Antigravity CLI 全局集成、API relay 合作方页面+按 key 用量、设备连接图标区分、workspace 下载恢复、Claude text snapshot 修复）。**0 个文件冲突，干净 merge**；4 组自研（消息队列/字体缩放/路径显示/链接默认 Chrome）均确认保留。桌面版 0.7.29 exe 已云编译交付。
 
@@ -145,24 +152,36 @@
 
 ## 合并上游 SOP（下次升级）
 
-完整流程（含 4 台 PVE 更新与桌面版云编译）见 [`docs/upstream-sync-and-fleet-deploy.md`](docs/upstream-sync-and-fleet-deploy.md)。速查：
+**照 [`SYNC-CHECKLIST.md`](SYNC-CHECKLIST.md) 逐步打勾**，那里是唯一的执行入口（含每步判据与终检）。速查：
 
 ```bash
 git fetch upstream main --tags --force
+git branch "backup-sync-$(date +%Y%m%d-%H%M%S)" sync       # 先留后路
 git checkout sync
 git merge upstream/main --no-edit
 # 冲突铁律：
-#   [zoom patch] / [preempt patch] 标记 → 保留 fork（消息队列/缩放/路径）
+#   [zoom patch] / [preempt patch] / workspace-badge 标记 → 保留 fork（消息队列/缩放/路径）
 #   其余 → 一律取上游（品牌/图标/安装路径跟随官方）
 #   重应用后必查：zoom 需补 readFileSync/writeFileSync 到 node:fs import、不调用 applyDesktopZoom
 npm install --include=dev --no-audit --no-fund
-npm run build
+npm run build                                              # 必须 exit=0
 # ⚠ 若报 SAFE_DELETE_BULK_CONFIRM_REQUIRED（沙箱批量删除保护，非代码错误）：
-#     mv dist dist.old && npm run build
+#     mv dist dist.old-<ts> && npm run build
 cd packages/desktop && npx tsc -p tsconfig.json --noEmit   # 推 GitHub 前必验
-git push origin sync
-# 之后：4 台 PVE 就地 git pull origin sync + npm run build + systemctl restart
-# 桌面版：gh workflow run "Manual Desktop Build" --ref sync -f target_os=win32 -f target_arch=x64
+cd ../..
+git push origin sync                                       # ✱ 推自己的 GitHub，别漏
+# 之后：
+#   4 台 PVE      bash scripts/deploy-one-vm.sh <931|935|936|961>
+#   浏览器验收    node scripts/verify-fleet.mjs           # 判据 通过 4/4
+#   本地打包      CODEBUDDY_SAFE_DELETE_ENABLED=0 bash scripts/local-package-win.sh
+#   装本机        'd:\desk\Ekko.Studio-<ver>-x64.exe' /S  （装前先 Stop-Process）
+#   更新文档      改 CUSTOM_CHANGES.md / MAINTAIN.md / memory → 再 push 一次
+#   指针漂移      bash scripts/sync-fleet-head.sh         # 只含文档改动时用这个，不用重建
+#   终检          node scripts/delivery-verify.mjs        # ✱ 必须 9/9 PASS 才算完成
+#
+
+# ⚠ 桌面版早已改为「本地打包」（2026-10-08 起），下面这条云编译命令已废止，勿再使用：
+#    gh workflow run "Manual Desktop Build" --ref sync -f target_os=win32 -f target_arch=x64
 ```
 
 ---

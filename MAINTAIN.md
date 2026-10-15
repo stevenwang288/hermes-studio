@@ -1,8 +1,17 @@
 # MAINTAIN.md — 这个 fork 该怎么维护
 
-> **给未来的 AI 助手 / 给未来的我：读这一份就够了，不用再问人。**
-> 本文件是 `stevenwang288/hermes-studio` 的唯一维护入口。
-> 详细手册见 [`docs/upstream-sync-and-fleet-deploy.md`](docs/upstream-sync-and-fleet-deploy.md)。
+> **给未来的 AI 助手 / 给未来的我：执行时先看 [`SYNC-CHECKLIST.md`](SYNC-CHECKLIST.md)，一份打勾清单走完。**
+> 本文件是背景原理与坑的说明。二者分工：
+>
+> | 文档 | 用途 |
+> |---|---|
+> | **[`SYNC-CHECKLIST.md`](SYNC-CHECKLIST.md)** | **执行清单**（10 步，逐步打勾，含命令与判据）—— 动手时看这个 |
+> | `MAINTAIN.md`（本文件） | 背景、原理、坑的解释、环境与配置 |
+> | `CUSTOM_CHANGES.md` | 自研功能清单 + 每轮记账 |
+> | [`docs/upstream-sync-and-fleet-deploy.md`](docs/upstream-sync-and-fleet-deploy.md) | 详细手册 |
+>
+> **第 10 步是硬闸门**：`node scripts/delivery-verify.mjs` 自动校验 9 项交付指标，
+> **有 1 项 FAIL 就不算完成**。别凭记忆说「都好了」。
 
 ---
 
@@ -18,10 +27,20 @@
 
 ## 1. 一句话概括要做的事
 
-> **上游更新了 → 合进来 → 本地验证 → 推 GitHub → 更新 4 台 PVE → 浏览器验收 4 台 → 出 Windows 安装程序并装到本机**
+> **上游更新了 → 合进来 → 本地验证 → 推 GitHub → 更新 4 台 PVE → 浏览器验收 4 台 → 出 Windows 安装程序并装到本机 → 更新文档记账 → 跑终检全绿**
 
-用户不需要每次交代，看到上游有新版本就按本文执行。
+用户不需要每次交代，看到上游有新版本就按 [`SYNC-CHECKLIST.md`](SYNC-CHECKLIST.md) 执行。
 **这条链是「一条龙」，缺任何一环都不算完成。**
+
+### 三步最容易漏（历史上真漏过，重点盯）
+
+| 步 | 为什么容易漏 | 后果 |
+|---|---|---|
+| **推自己的 GitHub** | 部署完就觉得"做完了"，忘了推 | 自己仓库落后本地，线上/文档版本对不上 |
+| **更新文档 + 记账** | 属于"收尾"性质，容易偷懒 | 下次不知道这轮做了什么、踩过什么坑 |
+| **终检** | 靠脑子的 | 上面两项漏了也没人知道 |
+
+对策就一个：**做完跑 `node scripts/delivery-verify.mjs`，它会自动抓这三项。**
 
 ---
 
@@ -106,6 +125,32 @@ node scripts/verify-fleet.mjs 935      # 单台
 ### 第 6 步 · 出 Windows 安装程序并装到本机
 
 见第 6 节。产物放哪、怎么装，都在那里（**别再问**）。
+
+### 第 7 步 · 更新文档 + 记账（**不许跳**）
+
+| 文件 | 何时改 | 必写内容 |
+|---|---|---|
+| **`CUSTOM_CHANGES.md`** | **每轮必改** | 合并情况（上游提交数/冲突/自研 grep/差异文件数）+ 交付情况（4 台 PVE 结果、验收分数、打包体积耗时、本机 ProductVersion 与 `/health`）+ 本轮新坑 |
+| `MAINTAIN.md` | 流程/路径有变才改 | 新坑进「故障速查」表，别为改而改 |
+| `.workbuddy/memory/YYYY-MM-DD.md` | 每轮必写 | 本轮结论与下次注意点 |
+
+记账本身是提交 → **写完要再 push 一次**，保证 GitHub 上的文档是最新的。
+
+### 第 8 步 · 终检（硬闸门）
+
+```bash
+node scripts/delivery-verify.mjs
+```
+
+自动校验 9 项并打出表格：**工作区干净 / 已推自己的 GitHub / 不落后上游 / 4 台 PVE commit / 4 台 PVE 存活 /
+桌面安装包 / 本机桌面版已升级 / 桌面服务健康 / 记账已更新**。
+**全 PASS 才能向用户汇报；把表格贴给用户，别口头声称完成。**
+
+> **注意漂移**：如果部署之后又产生了提交（比如现在这次的记账），4 台 PVE 的 HEAD 会落后于仓库。
+> 纯文档/脚本改动**不需要 build + restart**，只要把 git 指针快进即可：
+> ```bash
+> bash scripts/sync-fleet-head.sh     # 自动重试 + GnuTLS 失败时走 bundle 内网直传
+> ```
 
 ---
 
@@ -391,6 +436,8 @@ tasklist | grep -i "Ekko Studio"
 | **部署脚本里 `git fetch origin sync` 后 `git reset --hard origin/sync` 停在旧 commit** | `git fetch <remote> <branch>` **只写 `FETCH_HEAD`、不更新 `origin/<branch>` 本地引用** → `origin/sync` 仍是旧值 → reset 回退到旧代码，且脚本显示"成功"。**修法：先 `WANT=$(git ls-remote origin sync \| awk '{print $1}')`，fetch 后校验 `git rev-parse FETCH_HEAD` == `$WANT`，再 `git reset --hard "$WANT"`**。已固化在 `scripts/deploy-one-vm.sh` |
 | PVE→GitHub `GnuTLS handshake failed`（间歇） | 真实存在但**间歇**，重试即可（961 曾连败 3 次第 4 次成功）。四台网络配置一致：mihomo 监听 `127.0.0.1:7890`、git 全局代理 7890、npm registry=npmmirror。**没有哪台有持续问题**，别去改配置，加重试就行 |
 | PVE 部署"成功"但功能没变 | `dist/server/index.js` mtime 是旧的 = 构建其实失败（脚本被 `| tail` 吞了退出码）→ 重装依赖重构建 |
+| **终检报「PVE xxx commit」FAIL（4 台落后本地 sync）** | 多半是**部署后又做了记账提交**。只看 commit 差多少：若只含文档/脚本改动，**不用重建不重启**，跑 `bash scripts/sync-fleet-head.sh` 快进 4 台 git 指针即可；若含 `packages/` 源码改动，走 `scripts/deploy-one-vm.sh` 完整部署 |
+| **某台 PVE 持续 `GnuTLS handshake failed`（重试 3 次以上不过）** | 别死磕。走 bundle 内网直传：`git bundle create /tmp/x.bundle <该台当前HEAD>..sync` → `scp` 过去 → `git fetch /tmp/x.bundle sync:incoming && git reset --hard <目标SHA>`。`sync-fleet-head.sh` 已内置这条旁路 |
 | `node scripts/verify-fleet.mjs` 报 `require is not defined in ES module scope` | 脚本 `.mjs` 却用 `require` → `cp scripts/verify-fleet.mjs .vfy-tmp.cjs && node .vfy-tmp.cjs`，跑完删 |
 | 验收报 `ECONNREFUSED 127.0.0.1:9222` | Chrome CDP 必须与脚本**同一条命令内**启动（见 4.5） |
 
