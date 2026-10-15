@@ -13,6 +13,17 @@
 
 **最近一次合并（2026-10-15）**：上游 0.7.34 → 0.7.35 共 6 个提交（Agent 卡片思考头像过渡动画 #3378/#3386、显示费用开关修复+Edge TTS 接口更新 #3381、会话删除/归档/未读跨设备同步 #3380、Ekko 自定义 Anthropic 地址路径拼接 #3384、Anthropic 兼容请求按模型输出上限设置 #3334）。**0 个文件冲突，干净 merge**（merge-tree 预演 0 冲突标记；4 个双方改文件 package-lock.json / ChatPanel.vue / MessageList.vue / model-request.test.ts 改动互不重叠全部自动合并）。逐项 grep 确认 8 项自研完整存活（①preempt×9/promote_all ②zoom patch ③workspace-badge ④default-browser+findChromeExecutable ⑤WEIXIN_DM_POLICY ⑥`|| current.id` ⑦_ALWAYS_EAGER×3 ⑧384000 cap）。`git diff upstream/main..sync` 圈定：16 个自研源码文件 + 运维资产，无夹带。本地 `npm run build` + 桌面 `tsc --noEmit` 均通过。
 
+**同日二次合并（2026-10-15 09:16）**：上游在同一 0.7.35 版本号下又推 3 个提交（新建会话分类选择器移入输入框工具栏 #3389、可见模型管理加搜索 #3393、尊重模型可见性+大目录告警 #3392；**上游尚未发版，package.json 仍为 0.7.35**）。**0 冲突干净 merge**（merge-tree 预演 0 冲突；唯一重叠文件 `ChatPanel.vue` 为自研③路径显示，三方合并自动保留）。合并后 HEAD `c41c75c1`。逐项 grep 确认 8 项自研全存活（①`preempt`×9 / `promote_all`×4 / abort `queued_messages` / ChatInput.vue 的 ESC+Ctrl+Enter promote 逻辑 ②`loadDesktopZoomLevel`×2 ③`workspace-badge`×2 ④`DEFAULT_LINK_OPEN_TARGET`×5 + `findChromeExecutable`×2 + `getZoomFactor` ⑤`ALLOW_ALL_USERS` ⑥`toolCallDelta.id ||` ⑦`_ALWAYS_EAGER`×3 ⑧`384000` cap）。`git diff upstream/main..sync` = 36 个文件（16 自研源码 + 4 测试 + 运维资产）。本地 `npm run build` + 桌面 `tsc --noEmit` 均通过，已推送 `origin/sync`。
+
+**部署与交付（2026-10-15）**：4 台 PVE（931/935/936/961）全部升级到 `c41c75c1`，`curl 8648` **4/4 HTTP 200**；浏览器验收（各发一道加法题、AI 答对才算过）**4/4 通过**（931=88 / 935=102 / 936=61 / 961=125）。
+
+**本轮踩坑（已写进 MAINTAIN.md 故障速查）**：
+
+- **961 `build` 报 `exit=137` 是 OOM，不是网络**。961 只有 4G 内存且 **0 swap**，vite/rolldown 并行构建吃爆内存被内核 Killed（`dmesg` 明确 `Out of memory: Killed process`）。**`NODE_OPTIONS=--max-old-space-size` 管不住 rolldown 的多线程原生内存峰值**，` vue-tsc -b` 分步跑能过但 `vite build` 仍 137。**解法：给 961 加 4G swap 文件并写入 `/etc/fstab` 持久化**，之后 `npm run build` 一次通过（可用内存 3.8G→7.8G）。
+- **deploy 脚本的 git 兜底有坑**：`git fetch origin sync` 只写 `FETCH_HEAD`、**不更新 `origin/sync` 本地引用**，随后 `git reset --hard origin/sync` 会静默回退到旧 commit（935 曾因此停在 `678ca544` 还显示部署成功）。**修法：先 `git ls-remote origin sync` 取目标 SHA，再 fetch 并校验 `git rev-parse FETCH_HEAD` 等于该 SHA，最后 `git reset --hard <SHA>`**（已改进 `scripts/deploy-one-vm.sh`）。
+- **PVE→GitHub 偶发 `GnuTLS handshake failed` 真实存在但间歇**（961 曾连败 3 次第 4 次成功、935 一次 pull 失败），重试即可。四台网络配置**完全一致**（均 mihomo 监听 `127.0.0.1:7890`、git 全局代理 7890、npm registry=npmmirror），实测 4 台 `git ls-remote` 均 5/5 成功（570~1160ms），**没有哪台有持续网络问题**。
+- 顺手提交：`scripts/verify-fleet.mjs` 的 `require` → `import` 修复（`.mjs` 里 `require is not defined` 的老 bug），现已能直接用 `node scripts/verify-fleet.mjs` 跑，不再需要 `cp` 成 `.cjs`。
+
 **上一次合并（2026-10-13）**：上游 0.7.33 → 0.7.34 共 15 个提交（编程 Agent 原生模型选择/记忆已选配置 #3354/#3360、统一模型选择弹窗 #3355、用量概览账号/Profile 筛选 #3363、用量精度/趋势图修复 #3373、**桌面远程服务器模式** #3366、Turkish locale #3338、MCP 继承 token 修复 #3359、思考标签混入正文 #3365 等）。**0 个文件冲突，干净 merge**，但上游 6 个自研重叠文件改动量大（chat-run.ts -142 / chat.ts -186 / ChatPanel.vue -664 / ChatInput.vue -103 / desktop-browser.ts / context-policy.ts），git 三方合并自动保留全部自研（上游从未有过 preempt 代码 → 我们 fork 的行当"新增"保留），逐项 grep 确认 6 项自研完整存活：
 - ① 消息队列：服务端 `preempt`/`run.promote`/`run.promote_all`（合并放行综合指令模板一字未损）+ 前端 Ctrl+Enter/ESC 全部保留，**且上游官方 `insert_queued_run`（打断当前 turn + 提队首执行）机制也并入** —— 双链路并存，未来可评估迁移到官方机制进一步降低冲突
 - ② 桌面缩放 `[zoom patch]` ✅、③ 路径完整显示 workspace-badge ✅、④ 链接默认系统浏览器 `DEFAULT_LINK_OPEN_TARGET='default-browser'` ✅、⑤ 微信扫码 DM 策略 ✅、⑥ 流式 tool_calls 空串修复 ✅、⑦ update_plan/task 卡 MCP 常驻（bridge 层）✅

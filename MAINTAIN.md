@@ -387,6 +387,9 @@ tasklist | grep -i "Ekko Studio"
 | 桌面路径搞错 | 桌面永远是 `d:\desk` |
 | VM `931`/`961` SSH 连不上 | VM 很可能 **stopped** → `ssh PVE "qm list"` 确认 → `qm start 931` / `qm start 961` |
 | PVE 构建报 `Cannot find module 'werift'` / `p2p.ts TS7006` | 依赖没装全 → 按第 4 节统一 npm 源+代理后 `npm install` |
+| **`npm run build` 报 `exit=137`（Killed），无错误信息** | **是 OOM，不是网络/代码错**。小内存 VM（如 961 仅 4G 且 0 swap）撑不住 vite/rolldown 并行构建，`dmesg` 可见 `Out of memory: Killed process`。`NODE_OPTIONS=--max-old-space-size` **无效**（管不住 rolldown 原生多线程）。**解法：加 swap** —— `fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile`，并 `echo '/swapfile none swap sw 0 0' >> /etc/fstab` 持久化 |
+| **部署脚本里 `git fetch origin sync` 后 `git reset --hard origin/sync` 停在旧 commit** | `git fetch <remote> <branch>` **只写 `FETCH_HEAD`、不更新 `origin/<branch>` 本地引用** → `origin/sync` 仍是旧值 → reset 回退到旧代码，且脚本显示"成功"。**修法：先 `WANT=$(git ls-remote origin sync \| awk '{print $1}')`，fetch 后校验 `git rev-parse FETCH_HEAD` == `$WANT`，再 `git reset --hard "$WANT"`**。已固化在 `scripts/deploy-one-vm.sh` |
+| PVE→GitHub `GnuTLS handshake failed`（间歇） | 真实存在但**间歇**，重试即可（961 曾连败 3 次第 4 次成功）。四台网络配置一致：mihomo 监听 `127.0.0.1:7890`、git 全局代理 7890、npm registry=npmmirror。**没有哪台有持续问题**，别去改配置，加重试就行 |
 | PVE 部署"成功"但功能没变 | `dist/server/index.js` mtime 是旧的 = 构建其实失败（脚本被 `| tail` 吞了退出码）→ 重装依赖重构建 |
 | `node scripts/verify-fleet.mjs` 报 `require is not defined in ES module scope` | 脚本 `.mjs` 却用 `require` → `cp scripts/verify-fleet.mjs .vfy-tmp.cjs && node .vfy-tmp.cjs`，跑完删 |
 | 验收报 `ECONNREFUSED 127.0.0.1:9222` | Chrome CDP 必须与脚本**同一条命令内**启动（见 4.5） |
