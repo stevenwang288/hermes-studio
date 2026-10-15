@@ -24,6 +24,8 @@
 - **PVE→GitHub 偶发 `GnuTLS handshake failed` 真实存在但间歇**（961 曾连败 3 次第 4 次成功、935 一次 pull 失败），重试即可。四台网络配置**完全一致**（均 mihomo 监听 `127.0.0.1:7890`、git 全局代理 7890、npm registry=npmmirror），实测 4 台 `git ls-remote` 均 5/5 成功（570~1160ms），**没有哪台有持续网络问题**。
 - 顺手提交：`scripts/verify-fleet.mjs` 的 `require` → `import` 修复（`.mjs` 里 `require is not defined` 的老 bug），现已能直接用 `node scripts/verify-fleet.mjs` 跑，不再需要 `cp` 成 `.cjs`。
 
+**桌面版交付（2026-10-15）**：本地打包 `Ekko.Studio-0.7.35-x64.exe`（189MB，11:00→11:07，7分36秒）已拷到 `d:\desk`（旧版 0.7.34 exe 由脚本自动清除，桌面只留最新版）。**本机已静默安装升级**：`ProductVersion` 由 `0.7.34.0` → **`0.7.35.0`**，启动后 19 个进程 + 1 个主窗口 + 监听 `0.0.0.0:26500`，`/health` 确认 `webui_version=0.7.35`、`gateway=running`，`agent_bridge` 约 60 秒后由 `unreachable` 转 `ready/running`（这个等待别省，早查会误判失败）。启动方式用 `explorer.exe` 代启动（直接 `Start-Process` 会被安全软件拦截起不来）。
+
 **上一次合并（2026-10-13）**：上游 0.7.33 → 0.7.34 共 15 个提交（编程 Agent 原生模型选择/记忆已选配置 #3354/#3360、统一模型选择弹窗 #3355、用量概览账号/Profile 筛选 #3363、用量精度/趋势图修复 #3373、**桌面远程服务器模式** #3366、Turkish locale #3338、MCP 继承 token 修复 #3359、思考标签混入正文 #3365 等）。**0 个文件冲突，干净 merge**，但上游 6 个自研重叠文件改动量大（chat-run.ts -142 / chat.ts -186 / ChatPanel.vue -664 / ChatInput.vue -103 / desktop-browser.ts / context-policy.ts），git 三方合并自动保留全部自研（上游从未有过 preempt 代码 → 我们 fork 的行当"新增"保留），逐项 grep 确认 6 项自研完整存活：
 - ① 消息队列：服务端 `preempt`/`run.promote`/`run.promote_all`（合并放行综合指令模板一字未损）+ 前端 Ctrl+Enter/ESC 全部保留，**且上游官方 `insert_queued_run`（打断当前 turn + 提队首执行）机制也并入** —— 双链路并存，未来可评估迁移到官方机制进一步降低冲突
 - ② 桌面缩放 `[zoom patch]` ✅、③ 路径完整显示 workspace-badge ✅、④ 链接默认系统浏览器 `DEFAULT_LINK_OPEN_TARGET='default-browser'` ✅、⑤ 微信扫码 DM 策略 ✅、⑥ 流式 tool_calls 空串修复 ✅、⑦ update_plan/task 卡 MCP 常驻（bridge 层）✅
