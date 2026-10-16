@@ -1541,6 +1541,27 @@ if (reasoningOperation) {
   reasoningOperation.responses['400'] = { description: 'Invalid effort, mode or native variant/family' }
   reasoningOperation.responses['503'] = { description: 'Native catalog unavailable for validating the paired model change' }
 }
+openapi.paths['/api/hermes/available-models'].get.description = 'Visible models for one Profile or all accessible Profiles. Full catalogs and hidden-model aliases are omitted. Each group has model_count; allProviders contains preset descriptors with empty models. Load a full directory on demand with GET /api/hermes/provider-models.'
+openapi.paths['/api/hermes/provider-models'].get = {
+  tags: ['Models'], operationId: 'getProviderModelCatalog', summary: 'Read the full model directory for one Provider',
+  description: 'Settings-only on-demand catalog, including hidden models and their aliases. Reads configured/cached models for the authorized Profile, with preset fallback. Does not probe upstream endpoints or scan capability metadata. Credentials are never returned.',
+  security: [{ BearerAuth: [] }],
+  parameters: [
+    { name: 'provider', in: 'query', required: true, schema: { type: 'string' } },
+    { name: 'profile', in: 'query', required: false, schema: { type: 'string' }, description: 'Authorized Profile; required here or in x-hermes-profile.' },
+  ],
+  responses: {
+    '200': { description: 'Complete Provider directory and current visible models', content: { 'application/json': { schema: {
+      type: 'object', required: ['provider', 'models', 'visible_models', 'model_aliases'], properties: {
+        provider: { type: 'string' }, models: { type: 'array', items: { type: 'string' } },
+        visible_models: { type: 'array', items: { type: 'string' } },
+        model_aliases: { type: 'object', additionalProperties: { type: 'string' } },
+      },
+    } } } },
+    '400': { description: 'Missing Provider or Profile' }, '403': { description: 'Profile access denied' },
+    '404': { description: 'Provider not found' },
+  },
+}
 openapi.paths['/api/coding-agents/models'] = { get: {
   tags: ['Coding Agents'], operationId: 'getCodingAgentModels', summary: 'Discover native models for one or all Coding Agents',
   description: 'Reads native CLI/account/config model directories on this Studio server, independently of Hermes Profiles. No chat prompts are sent. Each agent has its own discovery status; an individual failure does not fail the aggregate request. Successful results cache for 60 seconds and failures for 5 seconds. Refresh bypasses the cache while sharing in-flight requests. Builtin/configured entries do not prove account access. Raw native errors and credentials are never returned.',
@@ -1575,6 +1596,61 @@ if (usageStatsOperation) {
   accountParameter.description = 'Studio user ID, or unassigned. Omit to include all accounts.'
   usageStatsOperation.responses['400'] = { description: 'Invalid account ID or timezone' }
   usageStatsOperation.responses['403'] = { description: 'Selected Profile is not accessible to this user' }
+}
+
+// Named user themes use the same customization payload as /api/theme.
+const themeNameSchema = { type: 'string', minLength: 1, maxLength: 80 }
+openapi.paths['/api/theme/presets'].get.description = 'Lists themes owned by the authenticated Studio user. Preserves existing customization as the first theme on initial access.'
+openapi.paths['/api/theme/presets'].post.requestBody = { required: true, content: { 'application/json': { schema: {
+  type: 'object', required: ['name'], properties: {
+    name: themeNameSchema,
+    sourceId: { type: 'string', description: 'Owned theme to duplicate. Omit to create default customization without a wallpaper.' },
+    brightness: { type: 'string', enum: ['system', 'light', 'dark'], default: 'system' },
+    style: { type: 'string', enum: ['ink', 'comic'], default: 'ink' },
+  },
+} } } }
+openapi.paths['/api/theme/presets/{id}'].patch.requestBody = { required: true, content: { 'application/json': { schema: {
+  type: 'object', required: ['name'], properties: { name: themeNameSchema },
+} } } }
+openapi.paths['/api/theme/presets/{id}'].delete.description = 'Deletes an owned theme. Deleting the active theme activates the oldest remaining theme; deleting the last theme is rejected.'
+openapi.paths['/api/theme/presets/{id}/activate'].post.description = 'Activates an owned theme and restores brightness, style, appearance and wallpaper together.'
+for (const path of ['/api/theme/presets', '/api/theme/presets/{id}', '/api/theme/presets/{id}/activate']) {
+  for (const operation of Object.values(openapi.paths[path])) {
+    operation.responses['400'] = { description: 'Invalid theme settings, name, or deletion of the last theme' }
+    operation.responses['404'] = { description: 'Theme not found for the authenticated user' }
+  }
+}
+for (const operation of [openapi.paths['/api/theme'].put, openapi.paths['/api/theme/background'].post, openapi.paths['/api/theme/background'].delete]) {
+  operation.responses['409'] = { description: 'The supplied presetId is no longer the active theme. Reload before editing.' }
+}
+
+const themeArchivePreferences = [
+  { name: 'brightness', in: 'query', required: false, schema: { type: 'string', enum: ['system', 'light', 'dark'] }, description: 'Legacy device brightness. Used only when the stored theme has no mode.' },
+  { name: 'style', in: 'query', required: false, schema: { type: 'string', enum: ['ink', 'comic'] }, description: 'Legacy device style. Used only when the stored theme has no style.' },
+]
+const themeZipExport = openapi.paths['/api/theme/presets/{id}/export'].get
+themeZipExport.summary = 'Export an owned theme as a ZIP file'
+themeZipExport.description = 'Downloads an ekko-studio-theme version 1 ZIP containing theme.json and the optional background image. Includes the theme name, modes and all global/regional settings; excludes user IDs, server file paths and preset IDs. Legacy device mode/style query values are fallback values only.'
+themeZipExport.parameters = [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, ...themeArchivePreferences]
+themeZipExport.responses = {
+  '200': { description: 'Theme ZIP download', content: { 'application/zip': { schema: { type: 'string', format: 'binary' } } } },
+  '400': { description: 'Invalid fallback mode or style' }, '401': { $ref: '#/components/responses/Unauthorized' },
+  '404': { description: 'Theme is not owned by the authenticated user' }, '409': { description: 'The saved background file is missing' },
+}
+const themeZipImport = openapi.paths['/api/theme/presets/import'].post
+themeZipImport.summary = 'Import and activate a theme ZIP as a new theme'
+themeZipImport.description = 'Accepts the ZIP bytes directly, up to 12 MiB. Validates a version 1 manifest (up to 64 KiB) and optional PNG/JPEG/WebP/GIF background (up to 10 MiB). Rejects unsupported entries, paths, links, encryption, invalid settings and corrupt/oversized expanded data. Creates a new owned theme and activates it atomically; same-name themes remain separate and existing themes are preserved. On initial migration, query preferences preserve the previous device-only mode/style.'
+themeZipImport.parameters = themeArchivePreferences
+themeZipImport.requestBody = { required: true, content: { 'application/zip': { schema: { type: 'string', format: 'binary' } } } }
+themeZipImport.responses = {
+  '200': { description: 'Updated library and active theme', content: { 'application/json': { schema: {
+    type: 'object', required: ['activeId', 'themes', 'theme'], properties: {
+      activeId: { type: 'string' }, themes: { type: 'array', items: { type: 'object' } }, theme: { type: 'object' },
+    },
+  } } } },
+  '400': { description: 'Invalid or unsupported archive, manifest, settings or entries' },
+  '401': { $ref: '#/components/responses/Unauthorized' },
+  '413': { description: 'ZIP or background exceeds the allowed size' }, '415': { description: 'Expected ZIP bytes or a supported background image' },
 }
 
 // Write output
