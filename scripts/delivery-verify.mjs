@@ -3,8 +3,10 @@
  * 一条龙交付终检 —— 硬闸门。
  *
  * 用法：node scripts/delivery-verify.mjs
+ *       node scripts/delivery-verify.mjs --skip-pve   # 本轮只更桌面版、PVE 不动时
  *
  * 自动校验 9 项交付指标，全部 PASS 才算「一条龙完成」。
+ * --skip-pve：PVE 4 台的 commit/存活共 8 项标 SKIP 且不判 FAIL（大哥明确本轮不动 PVE 时用）。
  * 只要有一项 FAIL -> 回到 SYNC-CHECKLIST.md 补完那一步再重跑。
  * 退出码：0 = 全绿，1 = 有 FAIL。
  */
@@ -76,7 +78,11 @@ function psOut(script) {
 
 const results = [];
 function record(name, pass, detail) {
-  results.push({ name, pass, detail });
+  results.push({ name, pass, detail, skip: false });
+}
+// skip=true 的项计入总数但不算 FAIL —— 仅用于大哥明确要求「本轮不动 PVE」的桌面-only 交付
+function recordSkip(name, detail) {
+  results.push({ name, pass: true, detail: `${detail} [SKIP]`, skip: true });
 }
 
 function width(s) {
@@ -124,7 +130,16 @@ let localSha = '';
 }
 
 // ---------- 4/5. 4 台 PVE：commit + HTTP ----------
-for (const vm of VMS) {
+// 大哥明确「本轮只更桌面版、PVE 不动」时传 --skip-pve（或 SKIP_PVE=1）：PVE 项标 SKIP 且不判 FAIL。
+const SKIP_PVE =
+  process.argv.includes('--skip-pve') || process.env.SKIP_PVE === '1';
+if (SKIP_PVE) {
+  for (const vm of VMS) {
+    recordSkip(`PVE ${vm.id} commit`, '本轮按大哥要求跳过 PVE');
+    recordSkip(`PVE ${vm.id} 服务存活`, '本轮按大哥要求跳过 PVE');
+  }
+}
+for (const vm of (SKIP_PVE ? [] : VMS)) {
   const out = sshOut(
     vm.id,
     `cd ${vm.dir} && echo "__H__=$(git rev-parse --short=7 HEAD) __C__=$(curl -s -o /dev/null -w '%{http_code}' -m 10 http://127.0.0.1:8648)"`
@@ -210,14 +225,18 @@ for (const vm of VMS) {
 console.log('');
 const NAME_W = 20;
 for (const r of results) {
-  console.log(`${r.pass ? '  PASS' : '  FAIL'}  ${pad(r.name, NAME_W)} ${r.detail}`);
+  const tag = r.skip ? '  SKIP' : r.pass ? '  PASS' : '  FAIL';
+  console.log(`${tag}  ${pad(r.name, NAME_W)} ${r.detail}`);
 }
 
-const failed = results.filter((r) => !r.pass);
+const failed = results.filter((r) => !r.pass && !r.skip);
+const skipped = results.filter((r) => r.skip);
+const passed = results.filter((r) => r.pass && !r.skip);
 console.log('');
 console.log('='.repeat(78));
 if (failed.length === 0) {
-  console.log(`全部通过 ${results.length}/${results.length} —— 一条龙完成，可以交付汇报。`);
+  const skipNote = skipped.length ? `（其中 ${skipped.length} 项 SKIP，${passed.length} 项 PASS）` : '';
+  console.log(`全部通过 ${results.length}/${results.length} ${skipNote} —— 一条龙完成，可以交付汇报。`);
   process.exit(0);
 } else {
   console.log(

@@ -50,8 +50,18 @@ git merge upstream/main --no-edit
 
 ## 第 3 步 · 本地三验（**跳过就是耍流氓**）
 
+**先判依赖要不要装 —— 别无条件 `npm install`**（大哥 2026-10-16 明确骂过）：
+
 ```bash
-npm install --include=dev --no-audit --no-fund
+# 看本轮合并有没有动依赖清单；LOCKED=0 才需要装
+git diff --name-only backup-sync-<本轮备份>..HEAD -- package.json package-lock.json packages/*/package.json
+```
+
+- 输出**为空** → 依赖没变，**直接跳到 build**，别装。
+- 有输出 → 依赖变了（上游加了/改了包或版本），**必须装**，且要说明"变了什么"（例：0.7.36 新增 `postcss`/`postcss-scss`）。
+
+```bash
+npm install --include=dev --no-audit --no-fund            # 仅当上一步有输出
 npm run build                                            # 必须 exit=0
 cd packages/desktop && npx tsc -p tsconfig.json --noEmit # 必须 exit=0
 ```
