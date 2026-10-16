@@ -128,14 +128,20 @@ cd packages/desktop && npx tsc -p tsconfig.json --noEmit
 **自研功能自检：**
 
 ```bash
+node scripts/self-check-custom.mjs      # 首选：一次跑全部命点，判据「全部 PASS」
+```
+
+手工兜底：
+
+```bash
 git grep -c "preempt" HEAD -- packages/server/src/modules/studio/sockets/chat-run.ts       # 应有值
 git grep -c "loadDesktopZoomLevel" HEAD -- packages/desktop/src/main/index.ts              # 应有值
 git grep -c "promoteQueuedMessage" HEAD -- packages/client/src/stores/hermes/chat.ts       # 应有值
-git grep -n 'split("/").pop()' HEAD -- packages/client/src/components/hermes/chat/ChatPanel.vue
-# 上面这条：workspace-badge 那段应已无 split("/").pop()；文件里其他地方有属正常
 ```
 
-`git diff --stat upstream/main..sync` 应只列出上述 10 个源码文件 + `CUSTOM_CHANGES.md` + `.gitignore`。
+> 注：旧自研③「路径完整显示(workspace-badge)」已于 2026-10-16 移除，`ChatPanel.vue` 现与上游逐字节一致，不再有该标记。
+
+`git diff --stat upstream/main..sync` 列出全部自研源码文件 + `CUSTOM_CHANGES.md` + `.gitignore`。
 
 ---
 

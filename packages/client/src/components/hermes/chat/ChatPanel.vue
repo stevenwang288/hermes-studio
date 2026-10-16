@@ -3048,23 +3048,6 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
               </svg>
             </template>
           </NButton>
-          <span class="header-session-title" dir="auto">{{ headerTitle }}</span>
-          <button
-            v-if="chatStore.activeSession?.workspace"
-            class="workspace-badge"
-            type="button"
-            :title="chatStore.activeSession.workspace"
-            @click="openActiveSessionWorkspace"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-            </svg>
-            <span>
-              {{ chatStore.activeSession.workspace }}
-            </span>
-          </button>
-        </div>
-        <div class="header-actions">
           <!-- chat/live mode toggle hidden -->
           <template v-if="currentMode === 'chat' && !showNewChatPage">
             <NTooltip v-if="isSuperAdmin" trigger="hover">
@@ -3992,39 +3975,6 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
     font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   }
 
-}
-
-.workspace-badge {
-  border: 0;
-  font-size: 11px;
-  line-height: 16px;
-  color: $text-muted;
-  background: rgba(255, 255, 255, 0.05);
-  padding: 2px 8px;
-  border-radius: 4px;
-  max-width: min(520px, 55vw);
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  overflow: hidden;
-  cursor: pointer;
-
-  svg {
-    flex: 0 0 auto;
-  }
-
-  span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
-  }
-
-  &:hover {
-    color: $text-secondary;
-    background: rgba(var(--accent-primary-rgb), 0.06);
-  }
 }
 
 .header-tool-toggle.active {

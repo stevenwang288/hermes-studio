@@ -4,8 +4,10 @@
  *
  * 用法：node scripts/self-check-custom.mjs
  *
- * 逐项 grep 8 个自研命点，确认没有被上游合并吃掉。
- * 退出码：0 = 8/8 全存活，1 = 有缺失（需要回去在第 2 步按冲突铁律重应用）。
+ * 逐项 grep 自研命点，确认没有被上游合并吃掉。
+ * 注：③「路径完整显示(workspace-badge)」已于 2026-10-16 主动移除（上游已具备该能力，改随上游）。
+ *     编号 ①-⑧ 保留不复用，便于对照历史记账。
+ * 退出码：0 = 全部存活，1 = 有缺失（需要回去在第 2 步按冲突铁律重应用）。
  */
 
 import { spawnSync } from 'node:child_process';
@@ -44,11 +46,6 @@ const CHECKS = [
     key: 'loadDesktopZoomLevel',
     file: 'packages/desktop/src/main/index.ts',
     label: '② 桌面字体缩放',
-  },
-  {
-    key: 'workspace-badge',
-    file: 'packages/client/src/components/hermes/chat/ChatPanel.vue',
-    label: '③ 路径完整显示',
   },
   {
     key: 'DEFAULT_LINK_OPEN_TARGET',
@@ -101,7 +98,7 @@ function pad(s, n) {
 console.log('自研功能存活自检');
 console.log('='.repeat(72));
 
-// 折叠出 8 个大项（同一功能的多个命中点合并显示）
+// 折叠出各大项（同一功能的多个命中点合并显示）
 const grouped = new Map();
 const missing = [];
 

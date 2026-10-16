@@ -11,12 +11,16 @@
 
 | 分支 | 版本 | 说明 |
 |------|------|------|
-| `sync` | **0.7.36** | 唯一有效分支。= 上游 `main` 最新 + 8 项自研功能，已通过 `npm run build` + 桌面 `tsc --noEmit` 验证 |
+| `sync` | **0.7.36** | 唯一有效分支。= 上游 `main` 最新 + 7 项自研功能（③路径显示已移除，改随上游），已通过 `npm run build` + 桌面 `tsc --noEmit` 验证 |
 | `main` | 0.7.21 | 停用的旧基线，**勿用** |
 
 **流程固化（2026-10-15）**：新增 [`SYNC-CHECKLIST.md`](SYNC-CHECKLIST.md)（10 步执行清单，把「推自己的 GitHub」「更新文档记账」两步显式列为不可跳过）+
 `scripts/delivery-verify.mjs`（9 项终检，一项 FAIL 就不算完成）+ `scripts/sync-fleet-head.sh`（只同步 4 台 git 指针，解决「部署后又记账 → PVE HEAD 漂移」）。
 首跑终检即抓出真问题：4 台停在 `c41c75c1` 而仓库已是 `cbd5d44e`（记账提交所致，运行时未变）。
+
+**自研变更（2026-10-16）· 移除自研③「路径完整显示」**：大哥拍板 —— 上游已有该能力（`activeWorkspacePath`/`activeWorkspaceSessionId`，见 #3396「不再截断 workspace 路径」），fork 早期自己加的 `workspace-badge` 徽标属重复，**这块完全改为跟随上游**。
+排查中发现该补丁还是**坏的**：它把顶栏 `header-actions` 拆成两个兄弟 div，并重复渲染了一次会话标题；且 `workspace-badge` 的 `v-if` 未排除新建对话页，导致在新建对话页点顶栏路径 chip 改的是**上一个会话**而不是即将新建的对话（用户实测踩到）。
+处置：`ChatPanel.vue` 模板 + 样式全部还原，现 `git diff upstream/main -- packages/client/src/components/hermes/chat/ChatPanel.vue` **为空**（逐字节一致）。自研从 **8 项 → 7 项**，`self-check-custom.mjs` 命点 **14 → 13**（13/13 PASS）。同步更新：`SYNC-CHECKLIST.md`（冲突铁律去掉 `workspace-badge`、自检判据去掉「路径显示」）、`scripts/self-check-custom.mjs`、`docs/upstream-sync-and-fleet-deploy.md`。**编号 ③ 保留不复用。**
 
 **最近一次合并（2026-10-16）**：上游 0.7.35 → **0.7.36** 共 9 个提交（实时主题定制+可移植主题预设 #3394、TOS 7 包自动构建 #3397、Windows 盘根 workspace 路径处理 #3396、工作流抽屉+聊天主题修复 #3398、Hermes 发布打包修复 #3400、30MB 动态壁纸 #3399、按需加载完整 provider 模型目录 #3401、Studio 侧栏可调宽 #3408、token 过期后 Hermes 群任务计划鉴权修复 #3409）。**唯一冲突 `.gitignore`**（双方各加不同条目，非互斥 → 两边都保留：fork 的本地杂物段 + 上游的 `/release/tos/`）。逐项 grep 确认 **8 项自研全存活**（①preempt×9/4/1/4/2 ②`loadDesktopZoomLevel`×2 ③`workspace-badge`×2 ④`DEFAULT_LINK_OPEN_TARGET`×5 ⑤`ALLOW_ALL_USERS` ⑥`toolCallDelta.id ||` ⑦`_ALWAYS_EAGER`×3 ⑧`384000` cap）。合并后 HEAD `8d95fe2d`，已推 `origin/sync`。本地 `npm run build` + 桌面 `tsc --noEmit` 均 exit=0。
 > **依赖确实变了，所以本轮 `npm install` 是必需的**：上游 0.7.36 新增 `postcss@^8.5.26` + `postcss-scss@^4.0.9`（package.json +2 行）、`package-lock.json` +33 行、新增 `pack:tos`/`verify:tos` 脚本。`npm install` 实加 1 个包。
@@ -104,11 +108,15 @@
 
 快捷键：Ctrl+加号/减号/0（步进 0.5，范围 -3~4）。**注意**：需补 `readFileSync, writeFileSync` 到 `node:fs` import；不要调用 `browserManager.applyDesktopZoom()`（上游无此方法）。
 
-### 3. 路径完整显示
+### 3. 路径完整显示 —— **已移除（2026-10-16）**
 
 | 文件 | 改动 |
 |------|------|
-| `client/src/components/hermes/chat/ChatPanel.vue` | workspace-badge 去掉 `split("/").pop()`；`max-width: min(520px, 55vw)`；等宽字体 |
+| ~~`client/src/components/hermes/chat/ChatPanel.vue`~~ | ~~workspace-badge 去掉 `split("/").pop()`；`max-width: min(520px, 55vw)`；等宽字体~~ |
+
+**2026-10-16 大哥拍板：放弃本项自研，改为跟随上游。** 上游自身已具备 workspace 路径处理能力（`activeWorkspacePath` / `activeWorkspaceSessionId`，见上游 commit #3396「不再截断 workspace 路径」），fork 早期的 `workspace-badge` 徽标属于多余重复，且它插入顶栏时把 `header-actions` 拆成了两个 div、并重复渲染了一次标题。
+现 `ChatPanel.vue` 已**逐字节还原为上游版本**（`git diff upstream/main -- ChatPanel.vue` 为空），顶栏只保留上游自带的文件夹圆钮 `header-workspace-button`（完整路径在 tooltip 里）。
+**编号 3 / ③ 保留不复用**，`scripts/self-check-custom.mjs` 已删除该项命点（现为 13 个命点 / 7 项功能）。
 
 ### 4. 链接默认打开方式 + 内置浏览器错位修复（2026-10-02 新增）
 

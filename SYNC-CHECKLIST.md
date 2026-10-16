@@ -43,7 +43,7 @@ git merge upstream/main --no-edit
 ```
 
 - **判据**：无 CONFLICT；`git diff --name-only --diff-filter=U` 为空；合并后再跑一次第 1 步的命令，**B 应回到 0**。
-- 冲突铁律：`[zoom patch]` / `[preempt patch]` / `workspace-badge` 标记处 → **保留 fork**；其余一律取上游。
+- 冲突铁律：`[zoom patch]` / `[preempt patch]` 标记处 → **保留 fork**；其余一律取上游。
 - 可提前预演：`git merge-tree --write-tree sync upstream/main`。
 
 ---
@@ -70,15 +70,16 @@ cd packages/desktop && npx tsc -p tsconfig.json --noEmit # 必须 exit=0
 - 撞 `SAFE_DELETE_BULK_CONFIRM_REQUIRED`（沙箱批量删除保护，**不是代码错**）→
   `mv dist dist.old-$(date +%s) && npm run build`。
 
-**自研存活自检**（合并后必做，确认 8 项自研没被上游吃掉）：
+**自研存活自检**（合并后必做，确认自研功能没被上游吃掉）：
 
 ```bash
 node scripts/self-check-custom.mjs
 ```
 
-判据：**全部命点 PASS**（消息队列 4 个端点 / 字体缩放 / 路径显示 / 链接默认浏览器+强制Chrome+zoom修复 /
+判据：**全部命点 PASS**（消息队列 4 个端点 / 字体缩放 / 链接默认浏览器+强制Chrome+zoom修复 /
 微信DM策略 / tool_calls 空串修复 / MCP常驻 / 商汤 384000 cap）。
 有 FAIL → 回第 2 步按冲突铁律重新应用自研代码，别往下走。
+> 旧自研③「路径完整显示(workspace-badge)」已于 2026-10-16 主动移除（改随上游），编号保留不复用。
 
 ---
 
