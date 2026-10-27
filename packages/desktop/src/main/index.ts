@@ -25,7 +25,6 @@ import {
 } from 'electron'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { spawn } from 'node:child_process'
 import {
   getToken,
   setWebUiRestartRequestHandler,
