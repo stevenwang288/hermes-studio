@@ -19,8 +19,8 @@ for (const target of [
       } }], edges: [], viewport: { x: 80, y: 80, zoom: .75 }, created_at: 1, updated_at: 1,
     }
     const api = await mockHermesApi(page, { workflows: [workflow], workflowRuns: [] })
-    await page.route('**/api/agents/status', route => route.fulfill({ json: {
-      revision: 1, updatedAt: new Date().toISOString(), agents: [{ id: target.agent, installed: true,
+    await page.route('**/api/agents/availability', route => route.fulfill({ json: {
+      revision: 1, updatedAt: new Date().toISOString(), agents: [{ id: target.agent, installed: true, available: true,
         source: 'user-cli', path: `/test/${target.agent}`, version: '1.0.0' }],
     } }))
     await page.route('**/api/coding-agents/models?*', route => route.fulfill({ json: { agents: [{
@@ -88,8 +88,8 @@ test('loading an old Global workflow discards ignored Model settings before savi
     } }], edges: [], viewport: { x: 80, y: 80, zoom: .75 }, created_at: 1, updated_at: 1,
   }
   const api = await mockHermesApi(page, { workflows: [workflow], workflowRuns: [] })
-  await page.route('**/api/agents/status', route => route.fulfill({ json: {
-    revision: 1, updatedAt: new Date().toISOString(), agents: [{ id: 'claude-code', installed: true,
+  await page.route('**/api/agents/availability', route => route.fulfill({ json: {
+    revision: 1, updatedAt: new Date().toISOString(), agents: [{ id: 'claude-code', installed: true, available: true,
       source: 'user-cli', path: '/test/claude', version: '1.0.0' }],
   } }))
   await page.route('**/api/coding-agents/models?*', route => route.fulfill({ json: { agents: [{
@@ -99,7 +99,7 @@ test('loading an old Global workflow discards ignored Model settings before savi
   await page.goto('/#/hermes/workflow')
   const node = page.locator('.vue-flow__node[data-id="agent"]')
   await expect(node.locator('.native-model-trigger')).toHaveText('Agent default model')
-  await expect(node.locator('.native-reasoning-effort')).toContainText('Default')
+  await expect(node.locator('.native-reasoning-effort')).toContainText('None')
   await page.locator('.header-actions').getByRole('button', { name: 'Save', exact: true }).click()
   const saves = () => api.requests.filter(request => request.method === 'PATCH' && request.pathname === '/api/studio/workflows/wf-legacy-global')
   await expect.poll(() => saves().length).toBe(1)

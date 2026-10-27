@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
+const mcpAlias = (ns: string, name: string) => `mcp_${createHash('sha256').update(JSON.stringify([ns, name])).digest('hex').slice(0, 40)}`
 import {
   anthropicMessageToResponses,
   normalizeResponseFunctionCall,
@@ -600,8 +602,8 @@ describe('agent runner Responses adapters', () => {
     expect(followup.tools).toEqual([
       expect.objectContaining({ name: 'tool_search' }),
       {
-        name: 'ekko_studio_browser_toolset',
-        description: 'Discover browser operations.',
+        name: mcpAlias('mcp__ekko_studio_browser', 'ekko_studio_browser_toolset'),
+        description: 'Discover browser operations. MCP tool: mcp__ekko_studio_browser.ekko_studio_browser_toolset.',
         input_schema: { type: 'object', properties: { action: { type: 'string' } }, required: ['action'] },
       },
     ])
@@ -612,7 +614,7 @@ describe('agent runner Responses adapters', () => {
       input: [], tools: [{ type: 'namespace', name: 'mcp__hermes_studio_api' }],
     }, target)
     expect(result.tools).toEqual(expect.arrayContaining([
-      expect.objectContaining({ function: expect.objectContaining({ name: 'hermes_studio_api_request' }) }),
+      expect.objectContaining({ function: expect.objectContaining({ name: mcpAlias('mcp__hermes_studio_api', 'hermes_studio_api_request') }) }),
     ]))
     expect(responseToolNamespaceForName('hermes_studio_api_request')).toBe('mcp__hermes_studio_api')
     expect(responseToolNamespaceForName('ekko_studio_api_request')).toBe('mcp__ekko_studio_api')
@@ -620,15 +622,15 @@ describe('agent runner Responses adapters', () => {
 
   it('expands Hermes MCP namespace tools for Chat and Anthropic providers', () => {
     const body = {
-      input: [{ role: 'user', content: [{ type: 'input_text', text: 'list devices' }] }],
-      tools: [{ type: 'namespace', name: 'mcp__ekko_studio', description: 'Hermes tools' }],
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'list API modules' }] }],
+      tools: [{ type: 'namespace', name: 'mcp__ekko_studio_api', description: 'Studio API tools' }],
     }
 
     expect(responsesToOpenAiChat(body, target).tools).toEqual(expect.arrayContaining([
       expect.objectContaining({
         type: 'function',
         function: expect.objectContaining({
-          name: 'ekko_studio_lan_devices_scan',
+          name: mcpAlias('mcp__ekko_studio_api', 'ekko_studio_api_openapi_get'),
           parameters: expect.objectContaining({
             properties: expect.objectContaining({
               profile: expect.any(Object),
@@ -641,7 +643,7 @@ describe('agent runner Responses adapters', () => {
 
     expect(responsesToAnthropicMessages(body, target).tools).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        name: 'ekko_studio_lan_devices_scan',
+        name: mcpAlias('mcp__ekko_studio_api', 'ekko_studio_api_openapi_get'),
         input_schema: expect.objectContaining({
           properties: expect.objectContaining({
             profile: expect.any(Object),
@@ -658,20 +660,18 @@ describe('agent runner Responses adapters', () => {
       tools: [
         { type: 'namespace', name: 'mcp__ekko_studio_api' },
         { type: 'namespace', name: 'mcp__ekko_studio_browser' },
-        { type: 'namespace', name: 'mcp__ekko_studio_devices' },
         { type: 'namespace', name: 'mcp__ekko_studio_use' },
       ],
     }
 
     const anthropicTools = responsesToAnthropicMessages(body, target).tools
     expect(anthropicTools.map((tool: any) => tool.name)).toEqual([
-      'ekko_studio_api_openapi_get',
-      'ekko_studio_api_request',
-      'ekko_studio_browser_toolset',
-      'ekko_studio_devices_toolset',
-      'ekko_studio_use_toolset',
+      mcpAlias('mcp__ekko_studio_api', 'ekko_studio_api_openapi_get'),
+      mcpAlias('mcp__ekko_studio_api', 'ekko_studio_api_request'),
+      mcpAlias('mcp__ekko_studio_browser', 'ekko_studio_browser_toolset'),
+      mcpAlias('mcp__ekko_studio_use', 'ekko_studio_use_toolset'),
     ])
-    expect(anthropicTools.find((tool: any) => tool.name === 'ekko_studio_browser_toolset')).toMatchObject({
+    expect(anthropicTools.find((tool: any) => tool.name === mcpAlias('mcp__ekko_studio_browser', 'ekko_studio_browser_toolset'))).toMatchObject({
       input_schema: {
         required: ['action'],
         properties: {
@@ -774,7 +774,7 @@ describe('agent runner Responses adapters', () => {
         message: {
           tool_calls: [{
             id: 'call_1',
-            function: { name: 'ekko_studio_lan_devices_scan', arguments: '{"profile":"default"}' },
+            function: { name: 'ekko_studio_api_openapi_get', arguments: '{"profile":"default"}' },
           }],
         },
       }],
@@ -782,8 +782,8 @@ describe('agent runner Responses adapters', () => {
       output: [{
         type: 'function_call',
         call_id: 'call_1',
-        name: 'ekko_studio_lan_devices_scan',
-        namespace: 'mcp__ekko_studio',
+        name: 'ekko_studio_api_openapi_get',
+        namespace: 'mcp__ekko_studio_api',
       }],
     })
   })
@@ -861,15 +861,15 @@ describe('agent runner Responses adapters', () => {
     expect(anthropicMessageToResponses({
       id: 'msg_1',
       content: [
-        { type: 'tool_use', id: 'toolu_1', name: 'ekko_studio_lan_devices_list', input: { profile: 'default' } },
+        { type: 'tool_use', id: 'toolu_1', name: 'ekko_studio_api_openapi_get', input: { profile: 'default' } },
       ],
       usage: { input_tokens: 1, output_tokens: 1 },
     }, target)).toMatchObject({
       output: [{
         type: 'function_call',
         call_id: 'toolu_1',
-        name: 'ekko_studio_lan_devices_list',
-        namespace: 'mcp__ekko_studio',
+        name: 'ekko_studio_api_openapi_get',
+        namespace: 'mcp__ekko_studio_api',
       }],
     })
   })
@@ -1012,7 +1012,7 @@ describe('agent runner Responses stream adapters', () => {
 
   it('marks expanded Hermes MCP Chat SSE tool calls with their Responses namespace', async () => {
     const events = await collectEvents(openAiChatSseToResponsesEvents(encodedChunks([
-      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"ekko_studio_lan_devices_scan","arguments":"{}"}}]}}]}\n\n',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"ekko_studio_api_openapi_get","arguments":"{}"}}]}}]}\n\n',
       'data: [DONE]\n\n',
     ]), codexTarget))
 
@@ -1023,8 +1023,8 @@ describe('agent runner Responses stream adapters', () => {
           item: expect.objectContaining({
             type: 'function_call',
             call_id: 'call_1',
-            name: 'ekko_studio_lan_devices_scan',
-            namespace: 'mcp__ekko_studio',
+            name: 'ekko_studio_api_openapi_get',
+            namespace: 'mcp__ekko_studio_api',
           }),
         }),
       }),
@@ -1087,7 +1087,7 @@ describe('agent runner Responses stream adapters', () => {
   it('marks expanded Hermes MCP Anthropic SSE tool calls with their Responses namespace', async () => {
     const events = await collectEvents(anthropicMessagesSseToResponsesEvents(encodedChunks([
       'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_1"}}\n\n',
-      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"ekko_studio_lan_devices_list","input":{}}}\n\n',
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"ekko_studio_api_openapi_get","input":{}}}\n\n',
       'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"profile\\":\\"default\\"}"}}\n\n',
       'event: message_stop\ndata: {"type":"message_stop"}\n\n',
     ]), codexTarget))
@@ -1099,8 +1099,8 @@ describe('agent runner Responses stream adapters', () => {
           item: expect.objectContaining({
             type: 'function_call',
             call_id: 'toolu_1',
-            name: 'ekko_studio_lan_devices_list',
-            namespace: 'mcp__ekko_studio',
+            name: 'ekko_studio_api_openapi_get',
+            namespace: 'mcp__ekko_studio_api',
           }),
         }),
       }),

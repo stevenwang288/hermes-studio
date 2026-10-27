@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import 'katex/dist/katex.min.css'
+import { stripToolCallMarkup } from '../../../../../shared/tool-call-markup'
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, unref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMessage } from 'naive-ui'
@@ -95,6 +96,9 @@ const md: MarkdownIt = new MarkdownItConstructor({
 // Preserve literal quote characters from user and assistant messages while
 // retaining typographer's other replacements (for example, dashes and ellipses).
 md.disable('smartquotes')
+// Bare source filenames such as DESIGN.md overlap real domain suffixes.
+// Explicit URLs and email addresses still use markdown-it's linkifier.
+md.linkify.set({ fuzzyLink: false })
 
 md.use(markdownItKatex, {
   katex,
@@ -248,7 +252,7 @@ function hasExtension(path: string, extensions: Set<string>): boolean {
 }
 
 const renderedHtml = computed(() => {
-  let html = md.render(repairNestedMarkdownFences(props.content))
+  let html = md.render(repairNestedMarkdownFences(stripToolCallMarkup(props.content)))
   if (props.deferImages) html = html.replace(/<img\b[^>]*>/gi, '')
 
   // Add IDs to headings for anchor links

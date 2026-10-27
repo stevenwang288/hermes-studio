@@ -60,6 +60,8 @@ export interface SessionMessage {
 }
 
 export interface QueuedRun {
+  /** Internal account-bound Person result delivery. */
+  personDelivery?: { userId: number; executionId: string }
   /** Internal admission check, never serialized or supplied by the client. */
   authorize?: () => Promise<void>
   /** Captured at admission, independent of whichever socket drains the queue. */
@@ -134,6 +136,10 @@ export interface QueueInsertionControl {
 }
 
 export interface SessionState {
+  /** Manual Hermes compression also holds history against message deletion. */
+  isCompressing?: boolean
+  /** Explicit Stop suppresses automatic wakeups until the next user run. */
+  backgroundWakeStopped?: boolean
   /** Snapshot the owning runtime's interrupted turn without waiting for model IO. */
   finalizeRunUsage?: () => RunUsageSummary | undefined
   nativeUsageSource?: 'coding_agent'
@@ -165,6 +171,8 @@ export interface SessionState {
   contextTokens?: number
   /** Ekko's system/tool context, kept separately from conversation history. */
   ekkoContext?: { fixedContextTokens: number }
+  /** Bound to the actual agent for this turn, including account agents such as Person. */
+  ekkoBoundaryInterrupt?: (expectedRunId: string) => { status: string; phase?: string; reason?: string }
   bridgeContext?: BridgeContextState
   isAborting?: boolean
   /** [preempt patch] 幂等保护:同一轮 abort 的 markAbortCompleted 只执行一次。

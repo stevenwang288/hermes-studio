@@ -3,8 +3,9 @@ import { resolve } from 'path'
 import { runInNewContext } from 'node:vm'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
+import type { DesktopRemoteDevicesBridge } from '../../packages/client/src/utils/desktop-bridge'
 
-function loadPreload(argv: string[], storedToken = 'remote-session') {
+function loadPreload(argv: string[], storedToken = 'remote-session', platform = 'darwin') {
   const storage = new Map(storedToken ? [['hermes_api_key', storedToken], ['AUTH_TOKEN', storedToken]] : [])
   const localStorage = {
     getItem: (key: string) => storage.get(key) ?? null,
@@ -32,7 +33,7 @@ function loadPreload(argv: string[], storedToken = 'remote-session') {
   runInNewContext(compiled, {
     exports: {},
     require: () => ({ contextBridge: { exposeInMainWorld: expose }, ipcRenderer: { invoke } }),
-    process: { argv, platform: 'darwin' },
+    process: { argv, platform },
     window,
     localStorage,
     Response,
@@ -42,11 +43,72 @@ function loadPreload(argv: string[], storedToken = 'remote-session') {
     remoteMode: boolean
     windowKind: string
     ensureAuth: () => Promise<boolean>
+    remoteDevices?: DesktopRemoteDevicesBridge
+    selectRuntimeDirectory?: (defaultPath?: string) => Promise<string | null>
+    restartApp?: () => Promise<boolean>
+    computerUsePermissions?: {
+      claimReminder: () => Promise<unknown>
+      getStatus: () => Promise<unknown>
+      request: (permission: 'accessibility' | 'screenRecording') => Promise<void>
+    }
+    messageContextMenu: {
+      show: (request: { label: string; enabled: boolean; hasSelection: boolean }) => Promise<'select-messages' | null>
+      close: () => Promise<void>
+    }
   }
   return { bridge, invoke, listeners, storage, window }
 }
 
 describe('desktop preload auth', () => {
+  it('exposes Runtime directory picking and app restarts only for a local backend', async () => {
+    const local = loadPreload([])
+    await local.bridge.selectRuntimeDirectory!('/runtime')
+    expect(local.invoke).toHaveBeenCalledWith('hermes-desktop:select-runtime-directory', '/runtime')
+    expect(loadPreload(['--hermes-remote-mode']).bridge.selectRuntimeDirectory).toBeUndefined()
+    await local.bridge.restartApp!()
+    expect(local.invoke).toHaveBeenLastCalledWith('hermes-desktop:restart-app')
+    expect(loadPreload(['--hermes-remote-mode']).bridge.restartApp).toBeUndefined()
+  })
+  it.each([false, true])('exposes remote device management only in the main window (remote=%s)', async remote => {
+    const args = remote ? ['--hermes-remote-mode'] : []
+    const { bridge, invoke } = loadPreload(args)
+    const devices = bridge.remoteDevices!
+    await devices.list()
+    expect(invoke).toHaveBeenLastCalledWith('hermes-desktop:remote-devices-list')
+    const input = { name: 'Home', serverUrl: 'http://home:6060' }
+    await devices.add(input)
+    expect(invoke).toHaveBeenLastCalledWith('hermes-desktop:remote-devices-add', input)
+    await devices.remove('home')
+    expect(invoke).toHaveBeenLastCalledWith('hermes-desktop:remote-devices-remove', 'home')
+    await devices.switchTo(null)
+    expect(invoke).toHaveBeenLastCalledWith('hermes-desktop:remote-devices-switch', null)
+    await devices.returnLocal()
+    expect(invoke).toHaveBeenLastCalledWith('hermes-desktop:remote-devices-return-local')
+    for (const kind of ['pet', 'chat']) expect(loadPreload([...args, `--hermes-window-kind=${kind}`]).bridge.remoteDevices).toBeUndefined()
+  })
+
+  it('exposes permission checks and explicit authorization only on a local Mac', async () => {
+    const { bridge, invoke } = loadPreload([])
+    expect(invoke).not.toHaveBeenCalled()
+    await bridge.computerUsePermissions!.claimReminder()
+    expect(invoke).toHaveBeenLastCalledWith('hermes-desktop:computer-use-claim-reminder')
+    await bridge.computerUsePermissions!.getStatus()
+    expect(invoke).toHaveBeenLastCalledWith('hermes-desktop:computer-use-permissions')
+    await bridge.computerUsePermissions!.request('screenRecording')
+    expect(invoke).toHaveBeenLastCalledWith('hermes-desktop:computer-use-request-permission', 'screenRecording')
+    expect(loadPreload(['--hermes-remote-mode']).bridge.computerUsePermissions).toBeUndefined()
+    for (const platform of ['win32', 'linux']) expect(loadPreload([], '', platform).bridge.computerUsePermissions).toBeUndefined()
+  })
+  it.each(['main', 'chat'])('exposes the message menu bridge in the %s window', async kind => {
+    const { bridge, invoke } = loadPreload(['--hermes-remote-mode', `--hermes-window-kind=${kind}`])
+    const request = { label: '多选消息', enabled: true, hasSelection: true }
+    invoke.mockResolvedValueOnce('select-messages')
+    expect(await bridge.messageContextMenu.show(request)).toBe('select-messages')
+    expect(invoke).toHaveBeenLastCalledWith('hermes-desktop:message-context-menu-show', request)
+    await bridge.messageContextMenu.close()
+    expect(invoke).toHaveBeenLastCalledWith('hermes-desktop:message-context-menu-close')
+  })
+
   it.each(['main', 'pet', 'chat'])('preserves remote auth and password policy in the %s window', async kind => {
     const preload = loadPreload(['--hermes-remote-mode', `--hermes-window-kind=${kind}`])
 

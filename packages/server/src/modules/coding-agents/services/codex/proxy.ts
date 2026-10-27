@@ -13,11 +13,13 @@ import { sseEvent } from '../../protocol/sse'
 import { AgentTargetRegistry, type AgentTargetInput, type RegisteredAgentTarget } from '../../protocol/target-registry'
 import type { ApiMode } from '../../protocol/types'
 import {
+  responseMcpToolRoutes,
   anthropicMessageToResponses,
   openAiChatToResponses,
   responsesToAnthropicMessages,
   responsesToOpenAiChat,
   stripHistoricalResponsesInlineImages,
+  targetReasoningEffort,
   truncateResponsesToolOutputs,
 } from '../../protocol/adapters/responses'
 import {
@@ -134,9 +136,12 @@ export function normalizeGrokResponsesRequest(body: any): any {
 
 function nativeResponsesBody(target: CodexProxyTarget, body: any, stream?: boolean): any {
   const normalized = target.agentId === 'grok' ? normalizeGrokResponsesRequest(body) : body
+  const reasoningEffort = targetReasoningEffort(target)
   return truncateResponsesToolOutputs({
     ...normalized,
     model: target.model,
+    // Scoped clients such as OpenCode may omit effort from their native request.
+    ...(reasoningEffort ? { reasoning: { ...normalized?.reasoning, effort: reasoningEffort } } : {}),
     ...(stream === undefined ? {} : { stream }),
   })
 }
@@ -306,6 +311,7 @@ async function openAiChatToResponsesSseStream(target: CodexProxyTarget, body: an
   return responsesEventStream(observableResponsesEvents(target, openAiChatSseToResponsesEvents(stream, {
     ...target,
     annotateMcpToolNamespaces: true,
+    mcpToolRoutes: responseMcpToolRoutes(body),
   }), startedAt))
 }
 
@@ -331,6 +337,7 @@ async function anthropicMessagesToResponsesSseStream(target: CodexProxyTarget, b
   return responsesEventStream(observableResponsesEvents(target, anthropicMessagesSseToResponsesEvents(stream, {
     ...target,
     annotateMcpToolNamespaces: true,
+    mcpToolRoutes: responseMcpToolRoutes(body),
   }), startedAt))
 }
 
@@ -373,10 +380,10 @@ export async function codexProxyResponses(ctx: Context) {
       ctx.body = stream
     } else {
       ctx.body = responseForCodexClient(target, target.apiMode === 'anthropic_messages'
-        ? anthropicMessageToResponses(await callAnthropicMessages(target, requestBody), target)
+        ? anthropicMessageToResponses(await callAnthropicMessages(target, requestBody), { ...target, mcpToolRoutes: responseMcpToolRoutes(requestBody) })
         : target.apiMode === 'codex_responses'
           ? await callOpenAiResponses(target, requestBody)
-          : openAiChatToResponses(await callOpenAiChat(target, requestBody), target))
+          : openAiChatToResponses(await callOpenAiChat(target, requestBody), { ...target, mcpToolRoutes: responseMcpToolRoutes(requestBody) }))
     }
   } catch (err: any) {
     ctx.status = err.status || 502
@@ -442,10 +449,10 @@ export async function antigravityProxyGenerate(ctx: Context) {
   try {
     const body = geminiToResponses(ctx.request.body || {})
     const response = responseForCodexClient(target, target.apiMode === 'anthropic_messages'
-      ? anthropicMessageToResponses(await callAnthropicMessages(target, body, abort.signal), target)
+      ? anthropicMessageToResponses(await callAnthropicMessages(target, body, abort.signal), { ...target, mcpToolRoutes: responseMcpToolRoutes(body) })
       : target.apiMode === 'codex_responses'
         ? await callOpenAiResponses(target, body, abort.signal)
-        : openAiChatToResponses(await callOpenAiChat(target, body, abort.signal), target))
+        : openAiChatToResponses(await callOpenAiChat(target, body, abort.signal), { ...target, mcpToolRoutes: responseMcpToolRoutes(body) }))
     const payload = responsesToGemini(response)
     ctx.set('Cache-Control', 'no-cache')
     if (String(ctx.params.operation).includes('streamGenerateContent')) {

@@ -27,6 +27,7 @@ from bridge_runtime import (
     _install_execute_code_approval_memory_patch,
     _jsonable,
     _load_cfg,
+    _load_disabled_toolsets,
     _load_enabled_toolsets,
     _load_fallback_model,
     _load_reasoning_config,
@@ -504,6 +505,7 @@ class AgentPool:
                     reasoning_config=_load_reasoning_config(resolved_model),
                     service_tier=_load_service_tier(),
                     enabled_toolsets=_load_enabled_toolsets(),
+                    disabled_toolsets=_load_disabled_toolsets(),
                     platform=_bridge_platform(),
                     session_id=session_id,
                     session_db=self._db.get_for_profile(profile),
@@ -2207,6 +2209,21 @@ class AgentPool:
                 del session.background_events[:-self.MAX_BACKGROUND_EVENTS_PER_SESSION]
             return interrupted
 
+    def _stop_session_processes(self, session_id: str) -> int:
+        try:
+            from tools.process_registry import process_registry
+        except ImportError:
+            return 0
+        stopped = 0
+        for process in process_registry.list_sessions(session_key=session_id):
+            if process.get("status") != "running":
+                continue
+            process_id = str(process.get("session_id") or "")
+            if process_id:
+                process_registry.kill_process(process_id)
+                stopped += 1
+        return stopped
+
     def interrupt(self, session_id: str, message: str | None = None) -> dict[str, Any]:
         with self._lock:
             session = self._sessions.get(session_id)
@@ -2226,6 +2243,10 @@ class AgentPool:
         if not hasattr(session.agent, "interrupt"):
             raise RuntimeError("agent does not support interrupt")
         session.agent.interrupt(message)
+        try:
+            self._stop_session_processes(session_id)
+        except Exception as exc:
+            print(f"[hermes_bridge] session process cleanup failed: {exc}", file=sys.stderr, flush=True)
         self._cancel_pending_approvals_for_generation(session_id, interrupted_run_id)
         deadline = time.time() + 10.0
         synced = False
@@ -2286,6 +2307,25 @@ class AgentPool:
                 "reason": "Session interrupted",
             })
         return len(terminal_queues) + len(gateway_approvals)
+
+    def cancel_boundary_interrupt(self, session_id: str, expected_run_id: str | None = None) -> dict[str, Any]:
+        with self._lock:
+            session = self._sessions.get(session_id)
+        if session is None:
+            return {"status": "not_running", "session_id": session_id}
+        with session.lock:
+            run_id = session.current_run_id
+            if not expected_run_id or run_id != expected_run_id:
+                return {"status": "run_mismatch", "session_id": session_id}
+            # Model cancellation may already have escaped the worker thread.
+            # Only a still-running tool batch has a safely recallable boundary.
+            if session.boundary_reached_run_id == run_id or session.boundary_phase != "tool_batch":
+                return {"status": "too_late", "session_id": session_id}
+            if session.boundary_pending_run_id != run_id:
+                return {"status": "not_pending", "session_id": session_id}
+            session.boundary_pending_run_id = None
+            self._clear_completed_boundary_interrupt(session.agent)
+            return {"status": "cancelled", "session_id": session_id, "run_id": run_id}
 
     def request_boundary_interrupt(
         self,
@@ -2464,6 +2504,19 @@ class AgentPool:
         arg = parts[1] if len(parts) > 1 else ""
 
         with _profile_env(profile):
+            if name == "plan":
+                try:
+                    from agent.plan_prompt import build_plan_prompt
+                except ImportError:
+                    return {
+                        "session_id": session_id, "command": name, "handled": False,
+                        "type": "plan",
+                        "message": "/plan requires a newer Hermes Agent runtime with agent.plan_prompt.",
+                    }
+                return {
+                    "session_id": session_id, "command": name, "handled": True,
+                    "type": "plan", "message": build_plan_prompt(arg),
+                }
             if name == "goal":
                 return self._dispatch_goal_command(session_id, arg)
             if name == "subgoal":
@@ -3009,7 +3062,18 @@ class AgentPool:
     def list_sessions(self) -> dict[str, Any]:
         with self._lock:
             sessions = list(self._sessions.values())
+        running_processes = 0
+        try:
+            from tools.process_registry import process_registry
+
+            running_processes = sum(
+                1 for process in process_registry.list_sessions()
+                if process.get("status") == "running"
+            )
+        except ImportError:
+            pass
         return {
+            **({"running_count": running_processes} if running_processes else {}),
             "sessions": [
                 {
                     "session_id": s.session_id,

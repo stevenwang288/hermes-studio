@@ -1,3 +1,4 @@
+import { cancelPersonDelivery } from '../person/delivery'
 /**
  * Abort handler — cancels in-progress runs (both API server and CLI bridge).
  */
@@ -66,6 +67,24 @@ export async function handleAbort(
     sessionMap.set(sessionId, state)
   }
   const isCodingAgentRun = state?.source === 'coding_agent' || state?.source === 'builtin_agent' || state?.webhookAgent === 'ekko' || hasCodingAgentRun || hasEkkoBackgroundTasks
+  if (state) {
+    state.backgroundWakeStopped = true
+    const dropped = state.queue.filter(item => item.goalContinuation || item.autonomous || item.backgroundDelegationId)
+    state.queue = state.queue.filter(item => !dropped.includes(item))
+    for (const item of dropped) if (item.personDelivery) cancelPersonDelivery(item.personDelivery.userId, item.personDelivery.executionId)
+    for (const item of dropped) {
+      if (item.backgroundDelegationId && item.backgroundClaimId) {
+        // Releasing a claim requeues it, undoing the user's Stop.
+        try {
+          void Promise.resolve(bridge.completeBackgroundNotification?.(
+            sessionId, item.profile || state.profile, item.backgroundDelegationId, item.backgroundClaimId,
+          )).catch((err: unknown) => logger.warn(err, '[chat-run-socket] failed to acknowledge stopped background wake'))
+        } catch (err) {
+          logger.warn(err, '[chat-run-socket] failed to acknowledge stopped background wake')
+        }
+      }
+    }
+  }
   if (
     (!state?.isWorking && !hasCodingAgentRun && !hasEkkoBackgroundTasks) ||
     (state && !isCodingAgentRun && !state.runId && !state.abortController)

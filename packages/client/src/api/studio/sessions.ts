@@ -55,6 +55,36 @@ export interface SessionDetail extends SessionSummary {
   messages: HermesMessage[]
 }
 
+export interface MessageSelectionGroup {
+  id: number
+  kind: 'message' | 'run'
+  messageIds: number[]
+  runMarker?: string
+  deleteBlockedReason?: 'compressed' | 'compression_boundary_unknown'
+}
+
+export interface MessageDeletionResult {
+  deleted: number
+  deletedGroups: number
+  messageIds: number[]
+  historyRevision: number
+  contextTokens?: number | null
+}
+
+export function fetchMessageSelection(sessionId: string, profile?: string) {
+  const query = profile ? `?profile=${encodeURIComponent(profile)}` : ''
+  return request<{ groups: MessageSelectionGroup[]; historyRevision: number }>(
+    `/api/studio/sessions/${encodeURIComponent(sessionId)}/message-selection${query}`,
+  )
+}
+
+export function deleteSessionMessages(sessionId: string, messageIds: number[], historyRevision: number, profile?: string) {
+  const query = profile ? `?profile=${encodeURIComponent(profile)}` : ''
+  return request<MessageDeletionResult>(`/api/studio/sessions/${encodeURIComponent(sessionId)}/messages/batch-delete${query}`, {
+    method: 'POST', body: JSON.stringify({ messageIds, historyRevision }),
+  })
+}
+
 export interface SessionContextMessage {
   id: number
   role: 'user' | 'assistant'
@@ -109,6 +139,7 @@ export interface HermesSessionPage {
 }
 
 export interface HermesMessage {
+  person_task_return?: import('../person').PersonTaskReturn
   run_usage?: import('@/utils/run-usage').RunUsageSummary
   id: number
   session_id: string
@@ -630,6 +661,7 @@ export async function exportSession(id: string, mode: 'full' | 'compressed' = 'f
 }
 
 export interface UsageStatsFilters {
+  origin?: 'internal' | 'external'
   profile?: string
   model?: string
   agent?: string
@@ -637,6 +669,7 @@ export interface UsageStatsFilters {
 }
 
 export interface UsageStatsResponse {
+  origin?: 'internal' | 'external'
   account_attribution_available?: boolean
   filter_options?: { models: string[]; agents: string[]; accounts?: Array<{ id: string; username: string }> }
   cost_coverage?: import('@/utils/usage-cost').UsageCostCoverage
@@ -693,6 +726,7 @@ export async function fetchUsageStats(days = 30, filters: UsageStatsFilters = {}
   if (filters.model) params.set('model', filters.model)
   if (filters.agent) params.set('agent', filters.agent)
   if (filters.account) params.set('account', filters.account)
+  if (filters.origin) params.set('origin', filters.origin)
   return request<UsageStatsResponse>(`/api/studio/usage/stats?${params}`)
 }
 

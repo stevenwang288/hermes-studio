@@ -1,9 +1,14 @@
+import { personBackgroundPendingCount } from '../../repositories/person-store'
+import { isPersonSession, isPrivatePersonSession } from '../../contracts/person-session'
+import { createPersonChatAgent } from '../person/chat-agent'
 import { studioSessionAccount } from '../../contracts/runs/usage'
 import { completeRunUsage } from '../../repositories/run-usage-store'
 import { studioMcpUsageGuidelines } from '../../public/runs/prompt'
 import { leaseEkkoMcpServers } from './ekko-mcp-lease'
 import { studioMcpCapabilities } from '../../public/runs/mcp-capabilities'
 import { saveTaskPlan } from '../../repositories/task-plan-store'
+import { getSessionTasks, updateSessionTasks } from '../session-tasks'
+import type { SessionTasksUpdate } from '../../contracts/session-task'
 import type { TaskPlanSnapshot } from '../../contracts/task-plan'
 import type { Server, Socket } from 'socket.io'
 import { createHash, randomUUID } from 'crypto'
@@ -133,7 +138,7 @@ function normalizeReasoningEffort(value: unknown): ModelReasoningEffort | undefi
 }
 
 function resolveReasoningEffort(value: unknown): ModelReasoningEffort {
-  return normalizeReasoningEffort(value) ?? 'medium'
+  return normalizeReasoningEffort(value) ?? 'none'
 }
 
 function parseJsonRecord(value: unknown): Record<string, unknown> | null {
@@ -141,10 +146,10 @@ function parseJsonRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>
 }
 
-function ekkoBackgroundPendingCount(state: SessionState): number {
+function ekkoBackgroundPendingCount(state: SessionState, sessionId: string, delegationId?: string): number {
   return Object.values(state.backgroundTasks || {}).filter(task =>
     task.runtime === 'ekko' && task.status === 'running',
-  ).length
+  ).length + personBackgroundPendingCount(sessionId, delegationId?.startsWith('person-result:') ? delegationId.slice('person-result:'.length) : '')
 }
 
 function parseToolArguments(raw: unknown): { arguments: Record<string, unknown>; rawArguments?: string } {
@@ -439,7 +444,7 @@ export async function handleEkkoAgentRun(
     return
   }
   const storedSession = getSession(sessionId)
-  const command = parseEkkoRunCommand(data, storedSession?.source)
+  const command = isPersonSession(sessionId) ? null : parseEkkoRunCommand(data, storedSession?.source)
   if (command && !backgroundContinuationContext) {
     await handleEkkoSessionCommand(nsp, socket, data, command, profile, sessionMap, dequeueNextQueuedRun)
     return
@@ -495,7 +500,9 @@ export async function handleEkkoAgentRun(
   const apiKey = runtimeConfig.apiKey
   const persistedReasoningEffort = normalizeReasoningEffort(data.reasoning_effort ?? storedSession?.reasoning_effort)
   const reasoningEffort = resolveReasoningEffort(persistedReasoningEffort)
-  const agent = getGlobalEkkoAgent(profile)
+  const agent = isPersonSession(sessionId) ? await createPersonChatAgent(Number(authenticatedUserId), sessionId) : getGlobalEkkoAgent(profile)
+  state.ekkoBoundaryInterrupt = agent.requestBoundaryInterrupt
+    ? (expectedRunId: string) => agent.requestBoundaryInterrupt({ sessionId, expectedRunId }) : undefined
   const workspace = selectWorkspace(
     data.workspace,
     storedSession?.workspace,
@@ -526,7 +533,7 @@ export async function handleEkkoAgentRun(
         : 'builtin_agent'
   const emit = (event: string, payload: any) => {
     const tagged = { ...payload, session_id: sessionId }
-    observeRunChatPetEvent(profile, event, tagged)
+    if (!isPrivatePersonSession(sessionId)) observeRunChatPetEvent(profile, event, tagged)
     data.onEvent?.(event, tagged)
     appendStateEvent(state, event, tagged)
     const outbound = buildOutboundRunEvent(event, tagged)
@@ -1288,6 +1295,15 @@ export async function handleEkkoAgentRun(
       userId: socket.data?.user?.id, signal: abortController.signal })
     releaseMcp = mcpLease.dispose
     logger.info('[chat-run-socket] starting ekko-agent run for session %s', sessionId)
+    const goalHistoryRevision = getSession(sessionId)?.history_revision || 0
+    const assertSessionGoalsActive = () => {
+      if (foregroundEnded || abortController.signal.aborted || !state.isWorking) throw new Error('Session goal context is unavailable or has expired.')
+      const currentSession = getSession(sessionId)
+      if (!currentSession || (currentSession.profile || 'default') !== profile
+        || (currentSession.history_revision || 0) !== goalHistoryRevision) {
+        throw new Error('The current session goal ledger is unavailable.')
+      }
+    }
     const toolContext = {
       cwd: workspace,
       workspaceRoot: workspace,
@@ -1295,6 +1311,16 @@ export async function handleEkkoAgentRun(
       userId: authenticatedUserId,
       sessionId,
       profileId: profile,
+      ...(!isPersonSession(sessionId) && !['group_chat', 'workflow', 'global_agent'].includes(sessionSource) && !data.background_delegation_id ? {
+        listSessionTasks: () => {
+          assertSessionGoalsActive()
+          return getSessionTasks(sessionId)
+        },
+        updateSessionTasks: (input: SessionTasksUpdate) => {
+          assertSessionGoalsActive()
+          return updateSessionTasks(sessionId, profile, { ...input }, goalHistoryRevision)
+        },
+      } : {}),
       browserSessionId: sessionId,
       mcpServers: mcpLease.servers,
       mcpSessionSignal: mcpLease.signal,
@@ -1444,6 +1470,7 @@ export async function handleEkkoAgentRun(
           defaultWriteScope: data.memory_default_write_scope ?? (isGroupMemory ? contextScope : profileScope),
         }
     const result = await agent.run({
+      memoryEnabled: !isPrivatePersonSession(sessionId),
       modelClient,
       model: modelConfig.model,
       reasoningEffort,
@@ -1576,7 +1603,7 @@ export async function handleEkkoAgentRun(
         run_id: runId || result.runId,
         error,
         queue_remaining: state.queue.length,
-        background_pending: ekkoBackgroundPendingCount(state),
+        background_pending: ekkoBackgroundPendingCount(state, sessionId, data.background_delegation_id),
         queue_id: data.queue_id,
         autonomous: data.autonomous === true,
         delegation_id: data.background_delegation_id,
@@ -1651,7 +1678,7 @@ export async function handleEkkoAgentRun(
         total_tokens: usageInput + usageOutput,
       },
       queue_remaining: state.queue.length,
-      background_pending: ekkoBackgroundPendingCount(state),
+      background_pending: ekkoBackgroundPendingCount(state, sessionId, data.background_delegation_id),
       queue_id: data.queue_id,
       autonomous: data.autonomous === true,
       delegation_id: data.background_delegation_id,
@@ -1683,7 +1710,7 @@ export async function handleEkkoAgentRun(
       run_id: runId,
       error,
       queue_remaining: state.queue.length,
-      background_pending: ekkoBackgroundPendingCount(state),
+      background_pending: ekkoBackgroundPendingCount(state, sessionId, data.background_delegation_id),
       queue_id: data.queue_id,
       autonomous: data.autonomous === true,
       delegation_id: data.background_delegation_id,
@@ -1694,6 +1721,7 @@ export async function handleEkkoAgentRun(
     foregroundEnded = true
     releaseIdleMcp()
     if (!abortController.signal.aborted || state.abortController === abortController) {
+      state.ekkoBoundaryInterrupt = undefined
       state.isWorking = false
       state.isAborting = false
       state.runId = undefined

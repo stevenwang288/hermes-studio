@@ -72,7 +72,7 @@ import {
   workflowLoopBodyNodeIds,
 } from '@/utils/workflow-edge-authoring'
 import WorkflowAgentNode from '@/components/hermes/workflow/WorkflowAgentNode.vue'
-import { canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
+import { configuredProviderApiMode, canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
 import WorkflowFieldHelp from '@/components/hermes/workflow/WorkflowFieldHelp.vue'
 import WorkflowConditionEdge from '@/components/hermes/workflow/WorkflowConditionEdge.vue'
 import FolderPicker from '@/components/hermes/chat/FolderPicker.vue'
@@ -133,9 +133,9 @@ import type {
 } from '@/components/hermes/workflow/types'
 import type { AvailableModelGroup } from '@/api/hermes/system'
 import {
-  fetchAgentStatusSnapshot,
-  isAgentStatusAvailable,
-  type AgentStatusSnapshot,
+  fetchAgentAvailabilitySnapshot,
+  isAgentAvailable,
+  type AgentAvailabilitySnapshot,
 } from '@/api/agent-status'
 
 import '@vue-flow/core/dist/style.css'
@@ -166,7 +166,7 @@ const workflowImportConfirmVisible = ref(false)
 const workflowImportPreview = ref<Awaited<ReturnType<typeof previewWorkflowImport>> | null>(null)
 const workflowImportProfile = ref('default')
 const workflowImportConfirming = ref(false)
-const agentStatusSnapshot = ref<AgentStatusSnapshot | null>(null)
+const agentAvailabilitySnapshot = ref<AgentAvailabilitySnapshot | null>(null)
 const WORKFLOW_CHAT_PANEL_MIN_WIDTH = 360
 const WORKFLOW_CHAT_PANEL_DEFAULT_WIDTH = 560
 const WORKFLOW_CANVAS_MIN_WIDTH = 360
@@ -431,7 +431,7 @@ let workflowBudgetClock: number | null = null
 const workflowAgentDefinitions = AGENT_OPTIONS
 
 const agentOptions = computed<WorkflowSelectOption[]>(() => workflowAgentDefinitions.filter(option =>
-  isAgentStatusAvailable(agentStatusSnapshot.value, option.value),
+  isAgentAvailable(agentAvailabilitySnapshot.value, option.value),
 ))
 
 const firstAvailableWorkflowAgent = computed(() =>
@@ -444,9 +444,9 @@ function workflowAgentDisplayName(agent: string): string {
 
 async function refreshAgentAvailability() {
   try {
-    agentStatusSnapshot.value = await fetchAgentStatusSnapshot()
+    agentAvailabilitySnapshot.value = await fetchAgentAvailabilitySnapshot()
   } catch {
-    agentStatusSnapshot.value = null
+    agentAvailabilitySnapshot.value = null
   }
 }
 const workflowRunBudgetOptions = computed(() => WORKFLOW_RUN_BUDGET_PRESETS.map(option => ({
@@ -689,7 +689,7 @@ const nodes = ref<WorkflowNode[]>(makeInitialNodes())
 const edges = ref<WorkflowEdge[]>([])
 
 function unavailableWorkflowAgent() {
-  return nodes.value.find(node => !isAgentStatusAvailable(agentStatusSnapshot.value, node.data.agent))
+  return nodes.value.find(node => !isAgentAvailable(agentAvailabilitySnapshot.value, node.data.agent))
 }
 
 const edgeEditorEdge = computed(() => edges.value.find(edge => edge.id === edgeEditorId.value) || null)
@@ -1056,7 +1056,7 @@ function normalizeNodeModel(data: WorkflowAgentNodeData): Pick<WorkflowAgentNode
   const currentGroup = availableGroups.find(group => group.provider === data.provider)
   // A workflow can retain a manually entered model under a supported provider.
   if (currentGroup && data.model) {
-    return { provider: data.provider, model: data.model, apiMode: data.apiMode || defaultApiMode(data.provider) }
+    return { provider: data.provider, model: data.model, apiMode: configuredProviderApiMode(currentGroup, data.model) || data.apiMode || defaultApiMode(data.provider) }
   }
   const fallbackGroup = availableGroups.find(group => group.models.length > 0)
   return {

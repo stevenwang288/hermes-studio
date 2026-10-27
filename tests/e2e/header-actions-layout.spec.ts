@@ -50,12 +50,17 @@ async function clippedControls(header: Locator) {
   })
 }
 
-for (const { widths, platform } of [
-  { widths: [390, 769, 900, 1440] },
-  { widths: [769], platform: 'win32' }, { widths: [769], platform: 'linux' },
-  { widths: [900], platform: 'darwin' },
+// Every route exercises responsive headers in the browser. Native chrome is a
+// shared shell: sample chat, a crowded toolbar and a configuration sidebar here;
+// desktop-window-chrome.spec.ts owns OS controls, RTL and native browser details.
+const nativeHeaderRoutes = ['/hermes/chat', '/hermes/jobs', '/studio/agents/codex/settings']
+for (const { widths, platform, paths } of [
+  { widths: [390, 769, 900, 1440], paths: routes },
+  { widths: [769], platform: 'win32', paths: nativeHeaderRoutes },
+  { widths: [769], platform: 'linux', paths: nativeHeaderRoutes },
+  { widths: [900], platform: 'darwin', paths: nativeHeaderRoutes },
 ]) {
-  for (const route of routes) {
+  for (const route of paths) {
     test(`keeps header actions visible on ${route} (${platform || 'browser'})`, async ({ page }) => {
       await page.setViewportSize({ width: widths[0], height: 900 })
       await page.clock.install()
@@ -170,11 +175,11 @@ test('keeps usage filters accessible below the standalone header at the minimum 
   await expect(filters.getByRole('button', { name: '90d', exact: true })).toHaveAttribute('aria-pressed', 'true')
 })
 
-for (const tab of ['app', 'mcu', 'devices']) {
+for (const tab of ['app', 'mcu']) {
   test(`keeps embedded connection header actions visible in the ${tab} panel`, async ({ page }) => {
     await setup(page)
     await page.goto(`/#/hermes/connections?tab=${tab}`)
-    const header = page.locator(tab === 'devices' ? '.devices-view .page-header' : '.connections-panel .panel-header')
+    const header = page.locator('.connections-panel .panel-header')
     await expect(header).toBeVisible()
     for (const width of [1440, 900, 769, 390]) {
       await page.setViewportSize({ width, height: 900 })

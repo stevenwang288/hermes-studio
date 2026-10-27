@@ -1,5 +1,7 @@
+import { isPersonSession, isPrivatePersonSession, ownsPersonSession } from '../contracts/person-session'
 import { isNativeCodingAgent } from '../contracts/agents/native-coding-agents'
 import { withRunUsage } from '../public/usage'
+import { withPersonTaskReturns } from '../services/person/service'
 import { businessEvents } from '../services/webhooks/business-events'
 import { publishSessionRemoval } from '../services/notifications/session-removal'
 import { getUsagePricing, saveUsagePricing, validateUsagePricing } from '../services/usage/usage-pricing'
@@ -9,6 +11,7 @@ import { ensureBusinessConsumers } from '../services/webhooks/business-consumers
 import { authorizeSessionShare, authorizeShareFile } from '../services/session-shares/access'
 import { sessionShareService } from '../services/session-shares/service'
 import { getSessionTaskPlans } from '../services/task-plans'
+import { getSessionTasks, listSessionTaskItems, setSessionTaskStatus, SessionTasksError } from '../services/session-tasks'
 import { historySessionSource, isBuiltinEkkoAgent } from '../contracts/history-source'
 import {
   deleteHermesSessionForProfile,
@@ -75,6 +78,7 @@ import {
   workspaceRelativePath,
 } from '../services/workspace/manager'
 import { getChatRunServer } from '../services/chat-run/server-registry'
+import { getMessageSelectionGroups } from '../public/sessions'
 import { isSensitivePath, MAX_DOWNLOAD_SIZE, MAX_EDIT_SIZE } from '../services/files/file-policy'
 import { buildFileContentHeaders, getFilePreviewDescriptor } from '../services/files/file-preview'
 import { decorateWorkspaceEntries, getWorkspaceFileGitDiff } from '../services/files/workspace-git-status'
@@ -87,6 +91,7 @@ function getPendingDeletedSessionIds(): Set<string> {
 
 function filterPendingDeletedSessions<T extends { id: string }>(items: T[]): T[] {
   const pendingIds = getPendingDeletedSessionIds()
+  items = items.filter(item => !isPrivatePersonSession(item.id))
   if (pendingIds.size === 0) return items
   return items.filter(item => !pendingIds.has(item.id))
 }
@@ -151,6 +156,9 @@ function filterByAllowedProfiles<T>(ctx: any, items: T[]): T[] {
 }
 
 function denySessionAccess(ctx: any, session: any | null | undefined): boolean {
+  if (ctx.method === 'GET' && ctx.state?.personTaskRead === session?.id) return false
+  if (isPersonSession(session?.id) && ownsPersonSession(ctx.state?.user?.id, session)) return false
+  if (isPrivatePersonSession(session?.id)) { ctx.status = 404; ctx.body = { error: 'Session not found' }; return true }
   if (!session || canAccessProfile(ctx, session.profile)) return false
   ctx.status = 403
   ctx.body = { error: `Profile "${session.profile || 'default'}" is not available for this user` }
@@ -158,7 +166,7 @@ function denySessionAccess(ctx: any, session: any | null | undefined): boolean {
 }
 
 function isVisibleWebUiSessionSource(source?: string | null): boolean {
-  return source === 'api_server' || source === 'cli' || source === 'builtin_agent' || source === 'coding_agent' || source === 'global_agent'
+  return source === 'api_server' || source === 'cli' || source === 'desktop' || source === 'builtin_agent' || source === 'coding_agent' || source === 'global_agent'
 }
 
 function isRequestedSessionSource(source: string | undefined, sessionSource?: string | null): boolean {
@@ -174,7 +182,7 @@ function requestedSessionSources(source?: string): string[] {
   if (source === 'global_agent') return ['global_agent']
   if (source === 'workflow') return ['workflow']
   if (source === 'group_chat') return ['group_chat']
-  return ['api_server', 'cli', 'builtin_agent', 'coding_agent', 'global_agent']
+  return ['api_server', 'cli', 'desktop', 'builtin_agent', 'coding_agent', 'global_agent']
 }
 
 function isHermesHistorySessionSource(source?: string | null): boolean {
@@ -1151,6 +1159,63 @@ function cleanSessionContextMessages(messages: any[]): Array<{
     })
 }
 
+export function listTasks(ctx: any) {
+  const { status, order = 'newest', search = '', offset = '0', limit = '50' } = ctx.query
+  if ((status !== undefined && status !== 'open' && status !== 'completed' && status !== 'closed')
+    || (ctx.query.profile !== undefined && typeof ctx.query.profile !== 'string')
+    || (order !== 'newest' && order !== 'oldest') || typeof search !== 'string' || search.length > 200
+    || typeof offset !== 'string' || !/^\d+$/.test(offset) || !Number.isSafeInteger(Number(offset))
+    || typeof limit !== 'string' || !/^\d+$/.test(limit) || Number(limit) < 1 || Number(limit) > 100) {
+    ctx.status = 400
+    ctx.body = { error: 'Invalid task list filters or pagination' }
+    return
+  }
+  // A run credential remains bound even when a caller requests all profiles.
+  const runScoped = Boolean(ctx.get?.('x-studio-run-context'))
+  const profile = runScoped ? ctx.state.profile?.name : explicitProfileFilter(ctx)
+  const allowed = allowedProfileSet(ctx)
+  const profiles = listProfileNamesFromDisk().filter(name => (!runScoped || Boolean(profile))
+    && (!profile || profile === name) && (!allowed || allowed.has(name)))
+  ctx.body = listSessionTaskItems({ profiles, excludeSessionIds: [...getPendingDeletedSessionIds()],
+    search: search.trim(), status, order, offset: Number(offset), limit: Number(limit) })
+}
+
+/** Read the goal ledger without adding it to chat messages or run events. */
+export function getTasks(ctx: any) {
+  const session = localGetSession(ctx.params.id)
+  const profile = explicitProfileFilter(ctx)
+  if (!session || (profile && (session.profile || 'default') !== profile)) {
+    ctx.status = 404
+    ctx.body = { error: 'Session not found' }
+    return
+  }
+  if (denySessionAccess(ctx, session)) return
+  ctx.body = getSessionTasks(session.id)
+}
+
+export function updateTaskStatus(ctx: any) {
+  if (ctx.get?.('x-studio-run-context')) {
+    ctx.status = 403
+    ctx.body = { error: 'Manual task status changes require user access' }
+    return
+  }
+  const session = localGetSession(ctx.params.id)
+  const profile = explicitProfileFilter(ctx)
+  if (!session || getPendingDeletedSessionIds().has(session.id) || (profile && (session.profile || 'default') !== profile)) {
+    ctx.status = 404
+    ctx.body = { error: 'Session not found' }
+    return
+  }
+  if (denySessionAccess(ctx, session)) return
+  try {
+    ctx.body = setSessionTaskStatus(session.id, session.profile || 'default', ctx.params.taskId, ctx.request.body || {})
+  } catch (error) {
+    if (!(error instanceof SessionTasksError)) throw error
+    ctx.status = error.status
+    ctx.body = { error: error.message }
+  }
+}
+
 export async function getContext(ctx: any) {
   const session = localGetSessionDetail(ctx.params.id)
   if (!session) {
@@ -1328,6 +1393,61 @@ export async function importHermesSession(ctx: any) {
   ctx.body = { ok: true, imported: true, session: localGetSessionDetail(detail.id) }
 }
 
+function messageDeletionSession(ctx: any) {
+  const session = localGetSession(ctx.params.id)
+  if (ctx.state?.sessionShare) {
+    ctx.status = 403
+    ctx.body = { error: 'Shared sessions do not allow message deletion' }
+    return null
+  }
+  if (denySessionAccess(ctx, session)) return null
+  if (!session || (requestedProfile(ctx) && requestedProfile(ctx) !== session.profile)) {
+    ctx.status = 404
+    ctx.body = { error: 'Session not found' }
+    return null
+  }
+  if (!['cli', 'api_server', 'desktop', 'builtin_agent'].includes(session.source)
+    || (session.agent && session.agent !== 'hermes' && !isBuiltinEkkoAgent(session.agent))) {
+    ctx.status = 400
+    ctx.body = { error: 'Message deletion is supported for Hermes and Ekko chat sessions' }
+    return null
+  }
+  return session
+}
+
+export async function messageSelection(ctx: any) {
+  const session = messageDeletionSession(ctx)
+  if (!session) return
+  const server = getChatRunServer()
+  if (!server) {
+    ctx.status = 503
+    ctx.body = { error: 'Chat runtime is unavailable' }
+    return
+  }
+  await server.assertSessionMessagesEditable(session.id)
+  ctx.body = { groups: getMessageSelectionGroups(session.id), historyRevision: session.history_revision }
+}
+
+export async function deleteMessages(ctx: any) {
+  const session = messageDeletionSession(ctx)
+  if (!session) return
+  const { messageIds, historyRevision } = (ctx.request.body || {}) as { messageIds?: number[]; historyRevision?: number }
+  if (!Array.isArray(messageIds) || messageIds.length === 0 || messageIds.length > 10_000
+    || messageIds.some(id => !Number.isSafeInteger(id) || id <= 0)
+    || !Number.isSafeInteger(historyRevision) || historyRevision! < 0) {
+    ctx.status = 400
+    ctx.body = { error: 'messageIds and a nonnegative historyRevision are required' }
+    return
+  }
+  const server = getChatRunServer()
+  if (!server) {
+    ctx.status = 503
+    ctx.body = { error: 'Chat runtime is unavailable' }
+    return
+  }
+  ctx.body = await server.deleteSessionMessages(session.id, [...new Set(messageIds)], historyRevision)
+}
+
 export async function remove(ctx: any) {
   const sessionId = ctx.params.id
   const existing = localGetSession(sessionId)
@@ -1392,6 +1512,11 @@ export async function batchRemove(ctx: any) {
   for (const target of targets) {
     const { id } = target
     const existing = localGetSession(id)
+    if (isPrivatePersonSession(id) && !ownsPersonSession(ctx.state?.user?.id, existing)) {
+      results.failed++
+      results.errors.push({ id, error: 'Session not found' })
+      continue
+    }
     const targetProfile = target.profile || existing?.profile
     if (targetProfile && !canAccessProfile(ctx, targetProfile)) {
       results.failed++
@@ -1739,6 +1864,12 @@ export async function contextLength(ctx: any) {
 }
 
 export async function usageStats(ctx: any) {
+  const origin = ctx.query?.origin || 'internal'
+  if (origin !== 'internal' && origin !== 'external') {
+    ctx.status = 400
+    ctx.body = { error: 'origin must be internal or external.' }
+    return
+  }
   const rawDays = parseInt(String(ctx.query?.days ?? '30'), 10)
   const days = ctx.query?.period === 'today' ? 1 : Number.isFinite(rawDays) && rawDays > 0 ? Math.min(rawDays, 365) : 30
   const readFilter = (value: unknown) => typeof value === 'string' ? value.trim() || undefined : undefined
@@ -1751,7 +1882,7 @@ export async function usageStats(ctx: any) {
     ctx.body = { error: 'account must be a Studio user ID or unassigned.' }
     return
   }
-  const selection = { model, agent, account } as import('../contracts/runs/usage').UsageStatsFilters
+  const selection = { model, agent, account, origin } as import('../contracts/runs/usage').UsageStatsFilters
   if (ctx.query?.period === 'today') {
     const timeZone = readFilter(ctx.query?.time_zone) || Intl.DateTimeFormat().resolvedOptions().timeZone
     try {
@@ -2196,7 +2327,7 @@ export async function getConversationMessagesPaginated(ctx: any) {
       input_tokens: session.input_tokens,
       output_tokens: session.output_tokens,
     },
-    messages: withRunUsage(ctx.params.id, result.messages),
+    messages: withPersonTaskReturns(ctx.params.id, withRunUsage(ctx.params.id, result.messages)),
     taskPlans: getSessionTaskPlans(ctx.params.id, result.messages, offset === 0),
     workspaceRunChanges: listWorkspaceRunChangesForAssistantMessages(ctx.params.id, assistantMessageIds),
     total: result.total,

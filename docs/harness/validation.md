@@ -1,14 +1,42 @@
 # Validation Guide
 
-For TOS packaging changes, run `npx vitest run tests/server/tos-packaging.test.ts`,
-`npm run harness:check`, and build a real package with `npm run pack:tos`.
-The package verifier checks metadata placement, languages, lifecycle syntax,
-identity, symlinks and glibc compatibility. Follow `packages/tos/README.md` for
-non-root startup and TNAS install/start/stop/upgrade/remove acceptance; an
-Ubuntu smoke test is not a substitute for TOS device validation.
-
 Run the smallest relevant checks while iterating. Escalate to the broad checks
 when touching shared behavior, release automation, auth, persistence, or chat.
+
+When running unit tests from a Desktop-hosted shell, use a regular Node process
+with `NODE_ENV=test` and clear inherited `HERMES_*`, `EKKO_*`, `ELECTRON_*`,
+`AUTH_TOKEN`, and `PORT` from that test process's environment. Production Vue,
+locked runtime selection and the live server port otherwise cause unrelated
+assertion failures. Keep the running app's environment unchanged.
+Use the development shell's `PATH` as well: Desktop's bundled Hermes Python can
+import its installed agent instead of the Python fixtures used by bridge tests.
+
+## Keep tests small
+
+- Put exhaustive data, protocol and state-transition cases in unit/integration
+  tests. Browser tests cover user journeys and representative request families.
+- Cover every page's responsive layout once. Test shared OS chrome with a chat,
+  crowded toolbar and configuration sidebar; platform controls and RTL belong
+  in `desktop-window-chrome.spec.ts`. Avoid multiplying every route by every OS.
+- Check appearance in the browser and theme ownership in the theme harness.
+  Do not add tests that match CSS declarations, SVG paths, class names or exact
+  Vue source strings. Keep behavior tests for navigation, permissions and state.
+- Use minimal isolated fixtures for harness rejection cases. Loading complete
+  business runtimes into every fixture duplicates the repository-wide harness.
+- Before removing coverage, identify its remaining owner. Layout/theme tests
+  live in the relevant browser suites; catalog and adapter matrices stay in
+  `native-coding-agents.test.ts` and `coding-agents-launch.test.ts`.
+
+Behavioral coverage owns the former source-layout checks:
+
+| Surface | Coverage owner |
+| --- | --- |
+| Chat navigation, menus, drawers and responsive headers | `navigation-rail`, `session-action-menu`, `desktop-window-chrome`, `header-actions-layout` browser suites |
+| File and terminal controls | `file-tree-collapse`, `terminal` browser suites |
+| Configuration navigation | all-route header sweep, `dsh-plugins`, `ekko-computer-use-settings` browser suites |
+| Workflow history, snapshot and evidence interactions | `workflow-ui` browser suite |
+| Colors, opacity, wallpaper and surfaces | theme harness and `theme-*.spec.ts` browser suites |
+| Modified session clicks and Agent identity | `session-list-item-navigation`, `chat-agent-avatar`, `native-coding-agents` unit tests |
 
 ## Always Run For PRs
 
@@ -23,6 +51,10 @@ npm run test:coverage
 npm run test:e2e
 npm run build
 ```
+
+Run full coverage and browser suites sequentially on local workstations. Their
+compilation and coverage work can compete for resources and trigger unrelated
+default timeouts when run together.
 
 ## Change-Type Matrix
 
@@ -86,8 +118,12 @@ state and does not require a running Gateway.
   CLI protocol fixtures on Windows, Linux and macOS, including long stdin prompts,
   non-ASCII installation paths and process cancellation. Vendor authentication
   and paid API calls are not required.
-- Playwright workflow: runs all browser tests across four independent shards,
+- Playwright workflow: runs all browser tests across six independent shards,
   then merges their blob reports into the `playwright-report` HTML artifact.
+  Each shard has a 23-minute Playwright global timeout before the 25-minute
+  test-step hard limit within a 30-minute job limit,
+  leaving time for dependency setup and report upload. CI logs each test result
+  so an interrupted shard still shows which cases completed.
   The final `e2e` check requires every shard to pass. Keep route/viewport sweeps
   as independent route tests so they can be distributed across runners.
   Mock both HTTP and WebSocket channels: `page.route` does not intercept native
@@ -98,6 +134,42 @@ state and does not require a running Gateway.
 - Docker workflow: builds and publishes release images.
 
 ## Desktop startup failure evidence
+
+On macOS, Desktop starts the Web UI in Node mode using the bundle's generic
+Electron Helper (`LSUIElement=true`). Native Computer Use focus protection can
+register the backend with AppKit; using the GUI executable creates a second Dock
+icon that never finishes launching. Keep focus protection enabled and preserve
+the existing executable on Windows, Linux, and plain Node hosts. Do not silently
+fall back to the GUI executable if the Helper is missing. Startup diagnostics
+record the selected executable.
+
+`tests/desktop/webui-node-executable.test.ts` covers platform selection and, when
+macOS Electron is installed, real Helper IPC, SQLite and nested Node execution.
+Set `EKKO_TEST_ELECTRON_EXECUTABLE` to a packaged app's main executable to run that
+same smoke test against its signed Helper. Before release, also verify real
+Computer Use input, permissions, focus preservation and Dock registration, plus
+backend restart, PTY, local STT and managed MCP launches from an isolated state
+directory. Mocked tests do not establish OS permission or input compatibility.
+
+The macOS Computer Use permission guide reads Electron's host-app permissions via
+trusted local-window IPC. Reads must use `isTrustedAccessibilityClient(false)` and
+`getMediaAccessStatus('screen')`; only the user's Authorize action may request a
+grant or open a fixed System Settings pane. Remote-server pages must not query or
+change local permissions. Run `tests/desktop/computer-use-permissions.test.ts`,
+`tests/desktop/preload-auth.test.ts`, and `tests/e2e/computer-use-permissions.spec.ts`
+for changes. Verify missing/granted/restricted/error states, returning from Settings,
+light/dark and wallpaper themes, and narrow windows. On a disposable macOS install,
+also verify first-time grants and any system-requested restart; never reset a user's
+TCC database to simulate a fresh install.
+
+The chat reminder uses only live tool-start events from the active Ekko session,
+never replayed history. Its native claim must stay atomic across all windows and
+renderer reloads, with one reminder per desktop launch. Run
+`tests/client/computer-use-permission-prompt.test.ts` and
+`tests/e2e/computer-use-permission-prompt.spec.ts` for notification changes, plus
+chat store regression tests. Verify both new runs and reattached live runs,
+standalone chat windows, dismissal, settings navigation, and silence in other
+agents/platforms/remote mode. No reminder check may request an OS grant.
 
 `Web UI server exited before becoming ready code=1 signal=null` reports a
 failed backend process, without identifying its cause. Desktop captures the
@@ -149,11 +221,18 @@ Expected desktop release outputs:
 | Target | Required release globs |
 | --- | --- |
 | macOS | `*.dmg`, `*.dmg.blockmap`, `*.zip`, `*.zip.blockmap`, `latest*.yml` |
-| Windows | `*.exe`, `*.exe.blockmap`, `latest*.yml` |
+| Windows x64 | `*-x64.exe`, `*-x64.exe.blockmap`, `latest.yml` |
+| Windows ARM64 | `*-arm64.exe`, `*-arm64.exe.blockmap`, `latest-arm64.yml` |
 | Linux x64 | `*.AppImage`, `*.deb`, `latest*.yml` |
 | Linux arm64 | `*.AppImage`, `latest*.yml` |
 
 ### Desktop updater changes
+
+For Windows ARM64 packaging changes, also run
+`npm run test -- tests/desktop/windows-arm64-packaging.test.ts tests/desktop/packaged-webui.test.ts`
+and build `win32` / `arm64` through the manual workflow without a release tag.
+Follow [Windows ARM64 acceptance](../../packages/desktop/WINDOWS-ARM64.md) before
+publishing; the installer and its first-launch Hermes runtime ship separately.
 
 Run `npm --prefix packages/desktop run test:updater` after installing desktop
 dependencies. This builds the production main process and exercises the installed

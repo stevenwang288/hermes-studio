@@ -1,3 +1,4 @@
+import { socketEndpoint } from '@/utils/deployment-url'
 import type { TaskPlanSnapshot } from '@/utils/task-plan'
 import { io, type Socket } from 'socket.io-client'
 import { disconnectBackgroundStatusObservers } from './background-status'
@@ -60,6 +61,7 @@ export interface StartRunResponse {
 
 // SSE event types from /v1/runs/{id}/events
 export interface RunEvent {
+  person_task_return?: import('../person').PersonTaskReturn
   run_usage?: import('@/utils/run-usage').RunUsageSummary
   event: string
   run_id?: string
@@ -261,10 +263,17 @@ const sessionEventHandlers = new Map<string, {
 
 const peerUserMessageHandlers = new Set<(event: RunEvent) => void>()
 const sessionCommandHandlers = new Set<(event: RunEvent) => void>()
+const unobservedRunStartedHandlers = new Set<(event: RunEvent) => void>()
+const personUpdatedHandlers = new Set<(event: RunEvent) => void>()
 const sessionTitleUpdatedHandlers = new Set<(event: RunEvent) => void>()
 const sessionWorkspaceUpdatedHandlers = new Set<(event: RunEvent) => void>()
 const sessionSettingsUpdatedHandlers = new Set<(event: RunEvent) => void>()
 const runUsageUpdatedHandlers = new Set<(event: RunEvent) => void>()
+
+export function onUnobservedRunStarted(handler: (event: RunEvent) => void): () => void {
+  unobservedRunStartedHandlers.add(handler)
+  return () => { unobservedRunStartedHandlers.delete(handler) }
+}
 
 export function onRunUsageUpdated(handler: (event: RunEvent) => void): () => void {
   runUsageUpdatedHandlers.add(handler)
@@ -388,6 +397,9 @@ function globalSubagentEventHandler(event: RunEvent): void {
 function globalRunStartedHandler(event: RunEvent): void {
   const sid = event.session_id
   if (!sid) return
+  if (!sessionEventHandlers.has(sid)) {
+    for (const handler of unobservedRunStartedHandlers) handler(event)
+  }
 
   const handlers = sessionEventHandlers.get(sid)
   if (handlers?.onRunStarted) {
@@ -729,6 +741,11 @@ export function onSessionCommand(handler: (event: RunEvent) => void): () => void
   }
 }
 
+export function onPersonUpdated(handler: (event: RunEvent) => void): () => void {
+  personUpdatedHandlers.add(handler)
+  return () => { personUpdatedHandlers.delete(handler) }
+}
+
 export function onSessionTitleUpdated(handler: (event: RunEvent) => void): () => void {
   sessionTitleUpdatedHandlers.add(handler)
   return () => {
@@ -820,7 +837,8 @@ export function connectChatRun(requestedProfile?: string | null, transport: Chat
   chatRunSocketTransport = transport
 
   const namespace = transport === 'global-agent' ? '/global-agent' : '/chat-run'
-  chatRunSocket = io(`${baseUrl}${namespace}`, {
+  chatRunSocket = io(socketEndpoint(baseUrl, namespace).url, {
+    path: socketEndpoint(baseUrl, namespace).path,
     auth: { token },
     query: { profile },
     transports: ['websocket', 'polling'],
@@ -886,6 +904,7 @@ export function connectChatRun(requestedProfile?: string | null, transport: Chat
 
     // Usage and task-plan events
     on('usage.updated', globalUsageUpdatedHandler)
+    on('person.updated', event => { for (const handler of personUpdatedHandlers) handler(event) })
     on('run.usage.updated', globalRunUsageUpdatedHandler)
     on('plan.updated', globalAgentEventHandler)
     on('agent.event', globalAgentEventHandler)

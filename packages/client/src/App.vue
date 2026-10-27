@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ensureRemoteBrowserRelay, stopRemoteBrowserRelay } from '@/composables/useRemoteBrowserRelay'
+import { deploymentUrl } from '@/utils/deployment-url'
 import {
   computed,
   defineAsyncComponent,
@@ -86,6 +88,9 @@ const RuntimeRestartPrompt = defineAsyncComponent(
   async () =>
     (await import("@/components/layout/RuntimeRestartPrompt.vue")).default,
 );
+const ComputerUsePermissionPrompt = defineAsyncComponent(
+  async () => (await import('@/components/ekko/ComputerUsePermissionPrompt.vue')).default,
+);
 const StudioAnnouncementPrompt = defineAsyncComponent(
   async () => (await import('@/components/layout/StudioAnnouncementPrompt.vue')).default,
 );
@@ -102,6 +107,7 @@ const naiveLocale = computed(() => naiveLocaleFor(locale.value));
 const naiveRtl = computed(() => naiveRtlFor(locale.value));
 const appStore = useAppStore();
 const profilesStore = useProfilesStore();
+watch(() => profilesStore.activeProfileName, async () => { await stopRemoteBrowserRelay(); await ensureRemoteBrowserRelay() });
 const route = useRoute();
 const { sessionSearchOpen } = useSessionSearch();
 
@@ -111,6 +117,7 @@ const themeOverrides = computed(() =>
 const naiveTheme = computed(() => (isDark.value ? darkTheme : null));
 
 const isLoginPage = computed(() => route.name === "login");
+watch(isLoginPage, login => { void (login ? stopRemoteBrowserRelay() : ensureRemoteBrowserRelay()) }, { immediate: true });
 watchServerTtsSettingsHydration({
   isLoginPage: () => isLoginPage.value,
   activeProfileName: () => profilesStore.activeProfileName,
@@ -140,7 +147,7 @@ provide(mobileNavigationKey, {
   target: computed(() => !isWideViewport.value && hasNavigationRail.value ? mobileSidebarHost.value : null),
 });
 const hasMobileContextSidebar = computed(() =>
-  !['hermes.connections', 'hermes.agentManager', 'hermes.models', 'hermes.usage', 'hermes.apiRelay'].includes(String(route.name)),
+  !['hermes.person', 'hermes.connections', 'hermes.agentManager', 'hermes.models', 'hermes.usage', 'hermes.apiRelay'].includes(String(route.name)),
 );
 watch([hasNavigationRail, isWideViewport], () => { mobileNavigationOpen.value = false; });
 watch(sessionSearchOpen, (open) => { if (open) mobileNavigationOpen.value = false; });
@@ -154,6 +161,7 @@ function handleWideViewportChange(event: MediaQueryListEvent) {
 }
 const usesPageSidebar = computed(() =>
   [
+    "hermes.person",
     "hermes.chat",
     "hermes.session",
     "hermes.connections",
@@ -383,7 +391,7 @@ useKeyboard();
                   @click="handleMobileMenuClick"
                 >
                   <img
-                    src="/logo.png"
+                    :src="deploymentUrl('/logo.png')"
                     alt="Menu"
                     style="width: 24px; height: 24px"
                   />
@@ -426,6 +434,9 @@ useKeyboard();
           />
           <RuntimeRestartPrompt
             v-if="!isLoginPage && !isDesktopPetRoute && !isStandaloneChatPage && isStoredSuperAdmin()"
+          />
+          <ComputerUsePermissionPrompt
+            v-if="!isLoginPage && !isInviteOnlyPage && !isDesktopPetRoute && desktopBridge()?.computerUsePermissions?.claimReminder"
           />
           <StudioAnnouncementPrompt
             v-if="!isLoginPage && !isInviteOnlyPage && !isDesktopPetRoute && !isStandaloneChatPage"
@@ -544,7 +555,6 @@ useKeyboard();
 }
 
 .app-shell--navigation-rail {
-  --studio-header-height: 40px;
   --studio-header-inset: #{$navigation-rail-width};
   --studio-content-gutter: 5px;
   --studio-content-radius: #{$radius-lg};
@@ -595,6 +605,7 @@ useKeyboard();
       min-height: 0;
       margin: 0;
       padding: 0 calc(16px * var(--spacing-scale, 1));
+      padding-right: var(--studio-header-controls-gap, calc(16px * var(--spacing-scale, 1))); // rtl-physical: the native device and window controls stay on the physical right in every locale.
       border: 0;
       background: transparent;
       overflow-x: auto;
@@ -673,6 +684,7 @@ useKeyboard();
   // Three 46px window buttons.
   &.desktop-platform-win32 .studio-page-header,
   &.desktop-platform-linux .studio-page-header {
+    --studio-header-controls-gap: calc(8px * var(--spacing-scale, 1));
     padding-right: var(--desktop-window-controls-width); // rtl-physical: window controls stay on the physical right in every locale.
   }
 

@@ -10,7 +10,7 @@ const sessionScrollPositions = new Map<string, MessageViewportScrollSnapshot>();
 </script>
 
 <script setup lang="ts">
-import { NSpin, NButton, NInput } from 'naive-ui'
+import { NSpin, NButton, NInput, NCheckbox, NModal, NDropdown } from 'naive-ui'
 import { usePageLoadingTask } from '@/composables/usePageLoading'
 import { ref, computed, nextTick, onBeforeUnmount, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -30,13 +30,19 @@ import { messageScrollPositionKey, rememberMessageScrollPosition } from "./messa
 import { chatSessionAgentAvatar } from "@/utils/chat-agent-avatar";
 import { parseThinking } from "@/utils/thinking-parser";
 import { groupCompletedToolsByRun } from "./tool-run-grouping";
+import { useMessageSelection } from './useMessageSelection';
+import type { MessageSelectionRow } from './message-selection';
+import { desktopBridge } from '@/utils/desktop-bridge';
 
 const props = withDefaults(defineProps<{
+  userLabel?: string
   approvalPortalToBody?: boolean
   scrollScope?: string
+  selectionActionsTarget?: HTMLElement | null
 }>(), {
   approvalPortalToBody: false,
   scrollScope: "chat",
+  selectionActionsTarget: null,
 })
 
 const chatStore = useChatStore();
@@ -102,7 +108,7 @@ function stopThinkingTimer() {
   }
 }
 
-const isRunIndicatorActive = computed(() => chatStore.isRunActive || !!chatStore.abortState);
+const isRunIndicatorActive = computed(() => chatStore.isRunActive || chatStore.abortState?.aborting === true);
 const formattedThinkingElapsed = computed(() => formatElapsed(thinkingElapsedMs.value));
 
 const currentToolCalls = computed(() => {
@@ -191,9 +197,9 @@ const activeSessionProfile = computed(() => (
   profilesStore.profiles.find(profile => profile.name === activeSessionProfileName.value) || null
 ));
 const userProfileName = computed(() => (
-  activeSessionProfile.value?.alias?.trim() || activeSessionProfileName.value
+  props.userLabel || activeSessionProfile.value?.alias?.trim() || activeSessionProfileName.value
 ));
-const userProfileAvatar = computed(() => activeSessionProfile.value?.avatar || null);
+const userProfileAvatar = computed(() => props.userLabel ? null : activeSessionProfile.value?.avatar || null);
 
 const emptyState = computed(() => {
   const agent = assistantAgent.value;
@@ -276,10 +282,100 @@ const displayMessagesWithForkDivider = computed<Message[]>(() => {
   ];
 });
 
+const {
+  selecting, loading: selectionLoading, deleting: deletingMessages, selected: selectedMessages,
+  supported: supportsMessageSelection, unavailable: selectionUnavailable, rows: messageRows,
+  start: startSelection, cancel: cancelSelection, toggle: toggleSelection, remove: deleteSelectedMessages,
+} = useMessageSelection(displayMessagesWithForkDivider);
+const showDeleteConfirmation = ref(false);
+watch(selecting, value => { if (!value) showDeleteConfirmation.value = false; });
+const selectionMenu = ref({ show: false, x: 0, y: 0 });
+const selectionMenuOptions = computed(() => [{
+  key: 'select-messages', label: t('chat.selectMessages'), disabled: selectionUnavailable.value,
+}]);
+const desktopMessageMenu = desktopBridge()?.isDesktop ? desktopBridge()?.messageContextMenu : undefined;
+let selectionMenuGeneration = 0;
+let nativeSelectionMenuOpen = false;
+function closeSelectionMenu() {
+  selectionMenuGeneration += 1;
+  selectionMenu.value.show = false;
+  if (nativeSelectionMenuOpen) {
+    nativeSelectionMenuOpen = false;
+    void desktopMessageMenu?.close().catch(() => undefined);
+  }
+}
+async function openSelectionMenu(event: MouseEvent) {
+  if (!supportsMessageSelection.value || selecting.value) return;
+  const target = event.target instanceof Element ? event.target : null;
+  // Child menus and editable fields retain their own native editing actions.
+  if (event.defaultPrevented
+    || target?.closest('input, textarea, select')
+    || (target instanceof HTMLElement && target.isContentEditable)) {
+    closeSelectionMenu();
+    return;
+  }
+  const hasSelection = !!window.getSelection()?.toString();
+  if (desktopMessageMenu) {
+    event.preventDefault();
+    event.stopPropagation();
+    selectionMenu.value.show = false;
+    const generation = ++selectionMenuGeneration;
+    nativeSelectionMenuOpen = true;
+    try {
+      const action = await desktopMessageMenu.show({
+        label: t('chat.selectMessages'), enabled: !selectionUnavailable.value, hasSelection,
+      });
+      if (generation !== selectionMenuGeneration) return;
+      nativeSelectionMenuOpen = false;
+      if (action === 'select-messages' && supportsMessageSelection.value && !selectionUnavailable.value && !selecting.value) {
+        window.getSelection()?.removeAllRanges();
+        void startSelection();
+      }
+    } catch (error) {
+      console.warn('[chat] Could not open native message menu', error);
+      if (generation === selectionMenuGeneration && !hasSelection) {
+        selectionMenu.value = { show: true, x: event.clientX, y: event.clientY };
+      }
+    } finally {
+      if (generation === selectionMenuGeneration) nativeSelectionMenuOpen = false;
+    }
+    return;
+  }
+  // On the web (and older desktop shells), preserve the browser Copy menu.
+  if (hasSelection) {
+    selectionMenu.value.show = false;
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  selectionMenu.value = { show: true, x: event.clientX, y: event.clientY };
+}
+function selectFromMenu() {
+  selectionMenu.value.show = false;
+  void startSelection();
+}
+function handleSelectionRowClick(event: MouseEvent, row: MessageSelectionRow) {
+  if (!selecting.value || !row.group) return;
+  // Let the checkbox handle its own click once; other content acts as one hit area.
+  if (event.target instanceof Element && event.target.closest('.message-selection-checkbox')) return;
+  event.preventDefault();
+  event.stopPropagation();
+  // Dragging to copy text also emits a click; it must not select the whole run.
+  if (window.getSelection()?.toString()) return;
+  if (selectionUnavailable.value || row.group.deleteBlockedReason) return;
+  toggleSelection(row.group.id, !selectedMessages.value.has(row.group.id));
+}
+watch([
+  () => chatStore.activeSessionId,
+  () => chatStore.activeSession?.historyRevision,
+  () => chatStore.focusMessageId,
+  supportsMessageSelection, selectionUnavailable, selecting,
+], closeSelectionMenu, { flush: 'sync' });
+
 const canForkActiveSession = computed(() => {
   const session = chatStore.activeSession;
   const hasConversation = displayMessages.value.some((message) => message.role === "user" || message.role === "assistant");
-  return !!session && session.source !== "coding_agent" && session.source !== "builtin_agent" && !chatStore.isStreaming && !chatStore.isForkPending && hasConversation;
+  return !!session && !session.id.startsWith("person-task-") && session.source !== "coding_agent" && session.source !== "builtin_agent" && !chatStore.isStreaming && !chatStore.isForkPending && hasConversation;
 });
 
 const lastForkActionMessageId = computed(() => {
@@ -438,11 +534,19 @@ function scrollToBottom(options?: BottomScrollOptions) {
   showScrollBottomButton.value = false;
 }
 
-function scrollToMessage(messageId: string) {
+async function scrollToMessage(messageId: string) {
+  if (selecting.value) {
+    cancelSelection();
+    await nextTick();
+  }
   listRef.value?.scrollToMessage(messageId);
 }
 
-function scrollToAnchor(messageId: string, anchorId: string) {
+async function scrollToAnchor(messageId: string, anchorId: string) {
+  if (selecting.value) {
+    cancelSelection();
+    await nextTick();
+  }
   listRef.value?.scrollToAnchor(messageId, anchorId);
 }
 
@@ -661,6 +765,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  closeSelectionMenu();
   stopThinkingTimer();
   saveSessionScrollPosition(activeSessionScrollKey.value);
 });
@@ -678,6 +783,17 @@ defineExpose({
 
 <template>
   <div class="message-list-shell" :aria-busy="isSearchLoading">
+    <NDropdown trigger="manual" placement="bottom-start" :show="selectionMenu.show"
+      :x="selectionMenu.x" :y="selectionMenu.y" :options="selectionMenuOptions"
+      @select="selectFromMenu" @clickoutside="selectionMenu.show = false" @update:show="selectionMenu.show = $event" />
+    <NSpin v-if="selectionLoading" size="small" class="message-selection-loading" />
+    <NModal v-if="selecting" v-model:show="showDeleteConfirmation" preset="dialog" type="warning"
+      :style="{ width: 'min(460px, calc(100vw - 32px))' }"
+      :title="t('chat.deleteSelectedMessages')" :content="t('chat.deleteMessagesConfirm', { count: selectedMessages.size })"
+      :positive-text="t('common.delete')" :negative-text="t('common.cancel')"
+      :positive-button-props="{ loading: deletingMessages, disabled: selectionUnavailable }"
+      :negative-button-props="{ disabled: deletingMessages }" :mask-closable="!deletingMessages" :closable="!deletingMessages"
+      @positive-click="deleteSelectedMessages" />
     <VirtualMessageList
       v-if="!isSearchFetching"
       :key="activeSessionScrollKey || 'chat-empty'"
@@ -685,7 +801,7 @@ defineExpose({
       :class="{ 'message-list--search-loading': isSearchLoading }"
       :inert="isSearchLoading || undefined"
       :aria-hidden="isSearchLoading || undefined"
-      :messages="displayMessagesWithForkDivider"
+      :messages="messageRows"
       :virtualized="(chatStore.activeSession?.loadedMessageCount || 0) > LIVE_CHAT_MAX_LOADED_MESSAGES"
       :padding="virtualListPadding"
       @scroll="handleListScroll"
@@ -710,40 +826,59 @@ defineExpose({
           <span v-if="chatStore.activeSession?.isLoadingOlderMessages" class="history-loader-spinner" role="status" :aria-label="t('common.loading')"></span>
         </div>
       </template>
-      <template #item="{ message: msg }">
-        <ToolRunCard
-          v-if="msg.systemType === 'tool-run' && msg.toolRunId && msg.toolMessages"
-          :run-id="msg.toolRunId"
-          :tools="msg.toolMessages"
-        />
-        <div v-else-if="msg.systemType === 'fork-divider' && forkLineage" class="fork-divider" role="separator">
-          <div class="fork-divider-line" aria-hidden="true"></div>
-          <div class="fork-divider-pill">
-            <span class="fork-divider-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" focusable="false">
-                <path d="M6 3v6a4 4 0 0 0 4 4h4.2" />
-                <path d="M18 9l4 4-4 4" />
-                <path d="M6 21V3" />
-                <circle cx="6" cy="5" r="2" />
-                <circle cx="6" cy="19" r="2" />
-              </svg>
-            </span>
-            <span class="fork-divider-text">{{ t("chat.forkedFrom") }}</span>
-            <a class="fork-divider-link" :href="forkLineage.parentHref" @click="openForkParent">
-              {{ forkLineage.parentTitle }}
-            </a>
+      <template #item="{ message: row }">
+        <div @contextmenu="openSelectionMenu" @click.capture="handleSelectionRowClick($event, row)" :class="{
+          'message-selection-row': selecting && row.group,
+          'message-selection-user': selecting && row.group?.kind === 'message' && ['user', 'command'].includes(row.messages[0]?.role),
+          'is-selected': row.group && selectedMessages.has(row.group.id),
+          'is-locked': selecting && row.group?.deleteBlockedReason,
+        }">
+          <NCheckbox v-if="selecting && row.group" class="message-selection-checkbox"
+            :checked="selectedMessages.has(row.group.id)" :disabled="selectionUnavailable || !!row.group.deleteBlockedReason"
+            :aria-disabled="selectionUnavailable || !!row.group.deleteBlockedReason"
+            :aria-label="row.group.kind === 'run' ? t('chat.selectAgentRun') : t('chat.selectSingleMessage')"
+            @update:checked="toggleSelection(row.group.id, $event)" />
+          <div class="message-selection-body">
+            <div v-for="msg in row.messages" :key="msg.id" class="message-selection-content">
+              <ToolRunCard
+                v-if="msg.systemType === 'tool-run' && msg.toolRunId && msg.toolMessages"
+                :run-id="msg.toolRunId"
+                :tools="msg.toolMessages"
+              />
+              <div v-else-if="msg.systemType === 'fork-divider' && forkLineage" class="fork-divider" role="separator">
+                <div class="fork-divider-line" aria-hidden="true"></div>
+                <div class="fork-divider-pill">
+                  <span class="fork-divider-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false">
+                      <path d="M6 3v6a4 4 0 0 0 4 4h4.2" />
+                      <path d="M18 9l4 4-4 4" />
+                      <path d="M6 21V3" />
+                      <circle cx="6" cy="5" r="2" />
+                      <circle cx="6" cy="19" r="2" />
+                    </svg>
+                  </span>
+                  <span class="fork-divider-text">{{ t("chat.forkedFrom") }}</span>
+                  <a class="fork-divider-link" :href="forkLineage.parentHref" @click="openForkParent">
+                    {{ forkLineage.parentTitle }}
+                  </a>
+                </div>
+                <div class="fork-divider-line" aria-hidden="true"></div>
+              </div>
+              <MessageItem
+                v-else
+                :message="msg"
+                :assistant-agent="assistantAgent"
+                :user-profile-name="userProfileName"
+                :user-profile-avatar="userProfileAvatar"
+                :highlight="chatStore.focusMessageId === msg.id"
+                :show-fork-action="!selecting && canForkActiveSession && msg.id === lastForkActionMessageId"
+              />
+            </div>
+            <div v-if="selecting && row.group?.deleteBlockedReason" class="message-selection-locked-hint">
+              {{ t(row.group.deleteBlockedReason === 'compressed' ? 'chat.messageAlreadyCompressed' : 'chat.messageCompressionBoundaryUnknown') }}
+            </div>
           </div>
-          <div class="fork-divider-line" aria-hidden="true"></div>
         </div>
-        <MessageItem
-          v-else
-          :message="msg"
-          :assistant-agent="assistantAgent"
-          :user-profile-name="userProfileName"
-          :user-profile-avatar="userProfileAvatar"
-          :highlight="chatStore.focusMessageId === msg.id"
-          :show-fork-action="canForkActiveSession && msg.id === lastForkActionMessageId"
-        />
       </template>
       <template #after>
         <Transition name="fade">
@@ -922,6 +1057,25 @@ defineExpose({
         </Transition>
       </template>
     </VirtualMessageList>
+    <Teleport v-if="selecting" :to="selectionActionsTarget || 'body'" :disabled="!selectionActionsTarget">
+      <div class="message-selection-toolbar">
+        <NButton size="small" quaternary circle :title="t('chat.deleteSelectedMessages')" :aria-label="t('chat.deleteSelectedMessages')"
+          :loading="deletingMessages" :disabled="selectionUnavailable || !selectedMessages.size" @click="showDeleteConfirmation = true">
+          <template #icon>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6" />
+            </svg>
+          </template>
+        </NButton>
+        <NButton size="small" quaternary circle :title="t('common.cancel')" :aria-label="t('common.cancel')" :disabled="deletingMessages" @click="cancelSelection">
+          <template #icon>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+              <path d="m6 6 12 12M18 6 6 18" />
+            </svg>
+          </template>
+        </NButton>
+      </div>
+    </Teleport>
     <div v-if="isSearchLoading" class="message-search-loading" role="status" :aria-label="t('common.loading')">
       <NSpin :description="t('common.loading')" />
     </div>
@@ -1160,6 +1314,68 @@ defineExpose({
   min-height: 0;
   position: relative;
   display: flex;
+  flex-direction: column;
+}
+
+.message-selection-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 8px 0;
+  margin-bottom: 4px;
+}
+
+.message-selection-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  grid-template-areas: 'checkbox body';
+  align-items: center;
+  gap: 12px;
+  // Selection boundaries remain visible even when the content surface is transparent.
+  border: 1px dashed color-mix(in srgb, var(--accent-primary) 40%, transparent);
+  border-radius: var(--radius-component, 8px);
+  padding: 12px;
+  cursor: pointer;
+
+  &.is-locked {
+    cursor: not-allowed;
+  }
+
+  &.is-selected {
+    border-style: solid;
+    border-color: var(--accent-primary);
+  }
+
+  &.message-selection-user {
+    grid-template-columns: minmax(0, 1fr) 20px;
+    grid-template-areas: 'body checkbox';
+  }
+
+  .message-selection-checkbox {
+    grid-area: checkbox;
+    justify-self: center;
+  }
+
+  .message-selection-body {
+    grid-area: body;
+    min-width: 0;
+  }
+
+  .message-selection-content + .message-selection-content {
+    margin-top: 16px;
+  }
+}
+
+.message-selection-locked-hint {
+  margin-top: 8px;
+  color: $text-secondary;
+  font-size: 12px;
+}
+
+.message-selection-loading {
+  align-self: center;
+  padding: 8px;
 }
 
 .message-list--search-loading {

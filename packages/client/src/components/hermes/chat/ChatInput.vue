@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { DEFAULT_REASONING_EFFORTS, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import { DEFAULT_REASONING_EFFORTS, agentReasoningEffortOptions, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
 import type { NativeEffortChoice } from '@/utils/native-model-families'
-import { isBuiltinEkkoSession, isExternalCodingAgentSession } from '@/utils/hermes/session-agent'
+import { isBuiltinEkkoSession, isExternalCodingAgentSession, isHermesSession } from '@/utils/hermes/session-agent'
 import { EKKO_SESSION_COMMAND_DEFINITIONS } from '@/utils/hermes/bridge-session-commands'
 import type { Attachment, Session } from '@/stores/hermes/chat'
 import { useChatStore } from '@/stores/hermes/chat'
@@ -42,11 +42,14 @@ const props = withDefaults(defineProps<{
   initialText?: string
   persistDraft?: boolean
   draft?: boolean
-  draftConfig?: Pick<Session, 'profile' | 'provider' | 'model' | 'codingAgentMode'>
+  draftConfig?: Pick<Session, 'profile' | 'provider' | 'model' | 'codingAgentMode' | 'agent'>
+  managedReasoningEffort?: boolean
   reasoningEffort?: string
   reasoningEffortDisabled?: boolean
+  scopedReasoningEfforts?: string[]
   nativeReasoningEfforts?: string[]
   nativeEffortChoices?: NativeEffortChoice[]
+  stopDisabled?: boolean
   sendDisabled?: boolean
   submit?: (text: string, attachments?: Attachment[]) => Promise<boolean>
 }>(), {
@@ -71,6 +74,8 @@ const emit = defineEmits<{
 }>()
 
 const reasoningSession = computed(() => props.draft ? props.draftConfig : composerSession.value)
+const defaultReasoningEffortLabel = computed(() => t(isHermesSession(reasoningSession.value)
+  ? 'chat.reasoningEffort.options.default' : 'chat.reasoningEffort.options.none'))
 const isMoaSession = computed(() => reasoningSession.value?.provider === 'moa')
 const isGlobalCodingAgentSession = computed(() => reasoningSession.value?.codingAgentMode === 'global')
 const isReadOnlyCodingAgentEffort = computed(() => !props.draft && isGlobalCodingAgentSession.value && isExternalCodingAgentSession(composerSession.value))
@@ -78,18 +83,18 @@ function effortLabel(value: string) {
   return DEFAULT_REASONING_EFFORTS.includes(value) || ['ultra', 'disabled', 'enabled'].includes(value) ? t(`chat.reasoningEffort.options.${value}`) : value
 }
 const showReasoningEffort = ref(false)
-const reasoningEffortOptions = computed(() => isGlobalCodingAgentSession.value && props.nativeEffortChoices
+const reasoningEffortOptions = computed(() => agentReasoningEffortOptions(isGlobalCodingAgentSession.value && props.nativeEffortChoices
   ? props.nativeEffortChoices.map(choice => ({ value: choice.effort,
-    label: choice.effort ? effortLabel(choice.effort) : t('chat.reasoningEffort.defaultLabel') })) : [
-  { label: t(isGlobalCodingAgentSession.value ? 'chat.reasoningEffort.defaultLabel' : 'chat.reasoningEffort.options.default'), value: '' },
-  ...(isGlobalCodingAgentSession.value ? props.nativeReasoningEfforts || [] : modelReasoningEfforts(
+    label: choice.effort ? effortLabel(choice.effort) : defaultReasoningEffortLabel.value })) : [
+  { label: defaultReasoningEffortLabel.value, value: '' },
+  ...(isGlobalCodingAgentSession.value ? props.nativeReasoningEfforts || [] : props.scopedReasoningEfforts ?? modelReasoningEfforts(
     appStore.profileModelGroups?.find(entry => entry.profile === (reasoningSession.value?.profile || profilesStore.activeProfileName))?.groups || appStore.modelGroups || [],
     reasoningSession.value?.provider || appStore.selectedProvider || '',
     reasoningSession.value?.model || appStore.selectedModel || '',
   )).map(value => ({ label: effortLabel(value), value })),
-])
+], isHermesSession(reasoningSession.value)))
 const currentReasoningEffort = computed<string>(() =>
-  (props.draft ? props.reasoningEffort : composerSession.value?.reasoningEffort
+  ((props.draft || props.managedReasoningEffort) ? props.reasoningEffort : composerSession.value?.reasoningEffort
     || props.nativeEffortChoices?.find(choice => choice.model === composerSession.value?.model)?.effort) || ''
 )
 const reasoningEffortSliderValue = computed(() => {
@@ -118,13 +123,13 @@ const canEditReasoningEffort = computed(() => !props.reasoningEffortDisabled && 
   && (!currentReasoningEffort.value || reasoningEffortOptions.value.some(option => option.value === currentReasoningEffort.value)))))
 const reasoningEffortLabel = computed<string>(() => {
   const v = currentReasoningEffort.value
-  if (!v) return t('chat.reasoningEffort.defaultLabel')
+  if (!v) return defaultReasoningEffortLabel.value
   const opt = reasoningEffortOptions.value.find(o => o.value === v)
   return opt?.label || effortLabel(v)
 })
 function onReasoningEffortChange(value: string | null | undefined) {
   if (!canEditReasoningEffort.value) return
-  if (props.draft) {
+  if (props.draft || props.managedReasoningEffort) {
     emit('update:reasoningEffort', value || '')
     return
   }
@@ -308,7 +313,7 @@ const skillPickerItems = computed(() => {
 })
 const filteredBridgeCommands = computed(() => {
   const query = slashQuery.value.trim().toLowerCase()
-  const commands = isEkkoSession.value
+  const commands = /^person-(main|task)-/.test(composerSession.value?.id || '') ? [] : isEkkoSession.value
     ? EKKO_SESSION_COMMAND_DEFINITIONS.map(command => ({ ...command, args: command.args || '', description: t(command.descriptionKey) }))
     : isBridgeSession.value
     ? bridgeCommands.value
@@ -838,7 +843,8 @@ async function loadContextLength() {
     } catch {
       if (currentContextLengthKey() !== key) return
       contextLength.value = FALLBACK_CONTEXT
-      contextLengthLoadedKey = key
+      // The fallback keeps the usage UI usable, but it is not resolved model
+      // metadata. Leave this key retryable on the next session/model lifecycle.
     } finally {
       if (contextLengthRequestKey === key) {
         contextLengthRequest = null
@@ -875,21 +881,21 @@ const cumulativeTokens = computed(() => {
 const totalTokens = computed(() => {
   if (showSessionUsage.value) return cumulativeTokens.value
   const context = composerSession.value?.contextTokens
-  if (typeof context === 'number' && Number.isFinite(context) && context > 0) return context
-  const input = composerSession.value?.inputTokens ?? 0
-  const output = composerSession.value?.outputTokens ?? 0
-  return input + output
+  if (typeof context === 'number' && Number.isFinite(context) && context >= 0) return context
+  // Cumulative consumption is not the size of the current context window.
+  return null
 })
 const showContextUsage = computed(() => !!composerSession.value)
 const showContextLimit = computed(() => !showSessionUsage.value)
 
-const remainingTokens = computed(() => Math.max(0, contextLength.value - totalTokens.value))
+const remainingTokens = computed(() => totalTokens.value == null ? null : Math.max(0, contextLength.value - totalTokens.value))
 
 const usagePercent = computed(() =>
-  Math.min((totalTokens.value / contextLength.value) * 100, 100),
+  Math.min(((totalTokens.value ?? 0) / contextLength.value) * 100, 100),
 )
 
-function formatTokens(n: number): string {
+function formatTokens(n: number | null): string {
+  if (n == null) return '—'
   if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
   if (n >= 1000) return (n / 1000).toFixed(1) + 'k'
   return String(n)
@@ -1254,6 +1260,7 @@ function openAttachmentPreview(attachment: Attachment) {
       </button>
     </div>
 
+    <slot name="before-context-usage" />
     <div v-if="showContextUsage" class="context-usage-row">
       <span class="context-info" :class="{ 'context-warning': showContextLimit && usagePercent > 80 }">
         <template v-if="showSessionUsage">{{ t('chat.sessionUsage') }} </template>
@@ -1271,7 +1278,7 @@ function openAttachmentPreview(attachment: Attachment) {
           · {{ t('chat.contextRemaining') }} {{ formatTokens(remainingTokens) }}
         </template>
       </span>
-      <div v-if="showContextLimit" class="context-bar">
+      <div v-if="showContextLimit && totalTokens != null" class="context-bar">
         <div
           class="context-bar-fill"
           :class="{
@@ -1483,7 +1490,7 @@ function openAttachmentPreview(attachment: Attachment) {
             circle
             class="send-button"
             :class="{ 'send-button--stop': sendButtonIsStop }"
-            :disabled="sendButtonIsStop ? chatStore.isAborting : !canSend || sendDisabled || submitting"
+            :disabled="sendButtonIsStop ? (stopDisabled || chatStore.isAborting) : !canSend || sendDisabled || submitting"
             :aria-label="sendButtonIsStop ? 'Stop' : 'Send'"
             @click="sendButtonIsStop ? chatStore.stopStreaming() : handleSend()"
           >
