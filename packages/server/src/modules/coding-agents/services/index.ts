@@ -508,8 +508,8 @@ function isNodeEnvironmentMissingError(err: any): boolean {
     typeof err?.stderr === 'string' ? err.stderr : '',
     typeof err?.stdout === 'string' ? err.stdout : '',
   ].filter(Boolean).join('\n').toLowerCase()
-  return text.includes('enoent') ||
-    text.includes('spawn npm') ||
+  return text.includes('spawn npm') ||
+    text.includes('spawn node') ||
     text.includes('npm: command not found') ||
     text.includes('npm not found') ||
     text.includes('node: command not found') ||
