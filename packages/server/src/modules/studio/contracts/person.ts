@@ -1,7 +1,7 @@
 import type { AgentMessage } from '../../../../../ekko-agent/src/model/types'
 
 export type PersonRole = 'main' | 'coordinator'
-export type PersonRunState = 'queued' | 'starting' | 'stopping' | 'running' | 'waiting_person' | 'waiting_user' | 'waiting_approval' | 'finished' | 'failed' | 'interrupted'
+export type PersonRunState = 'pending' | 'queued' | 'starting' | 'stopping' | 'running' | 'waiting_person' | 'waiting_user' | 'waiting_approval' | 'finished' | 'failed' | 'interrupted'
 export interface PersonSelection {
   runtime: string
   mode: 'scoped' | 'global'
@@ -28,7 +28,7 @@ export interface PersonSettings {
   reasoningEffort: string
   timezone: string
   maxSteps: number
-  contextTokens: number
+  compressionThreshold: number | null
   agents: PersonAgentPreset[]
   maxConcurrentTasks: number
 }
@@ -48,7 +48,9 @@ export interface PersonTask {
   created_at: number
   updated_at: number
   running?: boolean | number
+  execution_id?: string | null
   execution_state?: PersonRunState | 'idle'
+  pending_count?: number
 }
 export interface PersonExecution {
   id: string; task_id: string; owner_user_id: number; requirements_revision: number
@@ -68,8 +70,8 @@ export interface PersonSchedule {
   revision: number; misfire: 'skip' | 'run_latest'; created_at: number
 }
 export const PERSON_DEFAULTS: PersonSettings = {
-  model: null, reasoningEffort: '', timezone: 'Asia/Shanghai', maxSteps: 12, contextTokens: 16000,
-  agents: [], maxConcurrentTasks: 2, workspace: '',
+  model: null, reasoningEffort: '', timezone: 'Asia/Shanghai', maxSteps: 12,
+  agents: [], maxConcurrentTasks: 2, compressionThreshold: null, workspace: '',
 }
 export function personError(message: string, status = 400): Error & { status: number } {
   return Object.assign(new Error(message), { status })

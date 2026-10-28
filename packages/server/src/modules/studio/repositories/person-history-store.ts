@@ -7,7 +7,7 @@ import { getSession } from './session-store'
 
 export function personHasPendingWork(userId: number): boolean {
   return !!personDb().prepare(`SELECT 1 FROM person_executions e WHERE e.owner_user_id=? AND
-    (e.state IN ('queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval')
+    (e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval')
     OR EXISTS(SELECT 1 FROM person_deliveries d WHERE d.execution_id=e.id AND d.state IN ('pending','queued'))) LIMIT 1`).get(userId)
 }
 
@@ -30,7 +30,8 @@ export function clearPersonHistory(userId: number, historyRevision: number) {
     const rows = personHistorySessions(userId)
     for (const { id } of rows) {
       for (const table of ['messages', TASK_PLANS_TABLE, 'session_tasks', COMPRESSION_SNAPSHOT_TABLE, RUN_USAGE_TABLE,
-        SESSION_UPLOADS_TABLE, WORKSPACE_RUN_CHANGE_FILES_TABLE, WORKSPACE_RUN_CHANGES_TABLE]) {
+        SESSION_UPLOADS_TABLE, WORKSPACE_RUN_CHANGE_FILES_TABLE, WORKSPACE_RUN_CHANGES_TABLE,
+        'person_context_chunks', 'person_context_summaries', 'person_context_progress']) {
         db.prepare(`DELETE FROM ${table} WHERE session_id=?`).run(id)
       }
       if (id !== mainId) db.prepare('DELETE FROM sessions WHERE id=?').run(id)

@@ -6,8 +6,11 @@ import { onPersonUpdated, personUpdated } from '../repositories/person-updates'
 import { personChatInteraction, answerPersonChatInteraction } from '../services/person/chat-interactions'
 import { ownedPersonTaskSession } from '../services/person/task-chat'
 import { answerPersonTaskInteraction } from '../services/person/chat-interactions'
-import { isPersonSession, isPrivatePersonSession, ownsPersonSession, personSessionId } from '../contracts/person-session'
+import { isPersonSession, isPrivatePersonSession, ownsPersonSession, personSessionId, personNotificationRoom } from '../contracts/person-session'
+import { foregroundNotification, foregroundNotificationPreview } from '../services/chat-run/foreground-notification'
+import { chatCompletionText } from '../services/notifications/chat-completion-text'
 import { ensurePersonSession } from '../services/person/chat-agent'
+import { requirePersonAgents } from '../services/person/agents'
 import { isNativeCodingAgent } from '../contracts/agents/native-coding-agents'
 import { withRunUsage, onRunUsageUpdated } from '../repositories/run-usage-store'
 import { savePersonTaskReturn, withPersonTaskReturns } from '../repositories/person-return-store'
@@ -93,6 +96,7 @@ import type {
 import { authenticateUserToken, inspectAppUserToken, isAuthEnabled, type AuthenticatedUser } from '../public/auth'
 import { userCanAccessProfile } from '../repositories/users-store'
 import { observeRunChatPetEvent } from '../public/pet-events'
+import { observePersonPresenceEvent } from '../services/person/presence'
 import { observeChatRunWebhookEvent, type ChatRunWebhookAgent } from '../services/webhooks'
 import { getAgentStatusSnapshot } from '../public/agent-status-registry'
 import {
@@ -447,6 +451,7 @@ export class ChatRunSocket {
   })
   private bridgeResumePolls = new Set<string>()
   private readonly runWaiters = new Map<string, Set<(event: string, payload: any) => void>>()
+  private readonly runHandlers = new Map<string, Set<Promise<void>>>()
   private readonly pendingMobileLocations = new Map<string, PendingMobileLocationRequest>()
   private readonly mobileRunTargets = new Map<string, MobileDeviceTarget>()
   private readonly pendingMobileCalendar = new Map<string, PendingMobileCalendarRequest>()
@@ -462,7 +467,7 @@ export class ChatRunSocket {
   private stopPersonUpdates: () => void
   private personQuestions = new Map<number, ReturnType<typeof personChatInteraction>>()
 
-  constructor(io: Server) {
+  constructor(private readonly io: Server) {
     this.nsp = io.of('/chat-run')
     this.stopPersonUpdates = onPersonUpdated(userId => this.syncPersonInteraction(userId))
     this.stopUsageUpdates = onRunUsageUpdated((sessionId, summary) => {
@@ -875,6 +880,7 @@ export class ChatRunSocket {
       })
     }
     const socketUser = socket.data.user as AuthenticatedUser | undefined
+    if (socketUser && !shared) socket.join(personNotificationRoom(socketUser.id))
     const socketProfile = (socket.handshake.query?.profile as string) || 'default'
     const currentProfile = () => socketProfile || getActiveProfileName() || 'default'
     const mobileTarget = socket.data.mobileDeviceTarget as MobileDeviceTarget | undefined
@@ -1026,6 +1032,7 @@ export class ChatRunSocket {
       try {
         runProfile = resolveRunProfile(data.session_id, data.profile)
         if (isPersonSession(data.session_id)) {
+          requirePersonAgents(socketUser!.id)
           const { session, settings } = await ensurePersonSession(socketUser!.id)
           if (!settings.model) throw new Error('No available Person model')
           // Only input/queue identity comes from the client. Agent policy and resources are server-owned.
@@ -1868,6 +1875,7 @@ export class ChatRunSocket {
     if (isPersonSession(data.session_id)) {
       const userId = socket.data?.user?.id
       if (!ownsPersonSession(userId, getSession(data.session_id!))) throw new Error('Session not found')
+      requirePersonAgents(userId)
       const { settings } = await ensurePersonSession(userId)
       if (!settings.model) throw new Error('No available Person model')
       data = { session_id: data.session_id, input: data.input, queue_id: data.queue_id, onEvent: data.onEvent,
@@ -3027,25 +3035,24 @@ export class ChatRunSocket {
           ...result,
         })
       }
+      const automaticApprovals = new Set<string>()
       const respondToApproval = async (payload: any = {}) => {
         const choice = options.approvalChoice
-        if (!choice || settled) return
+        if (!choice || settled || state.isAborting || state.abortController?.signal.aborted) return
         const approvalId = typeof payload.approval_id === 'string' ? payload.approval_id : ''
         const rawChoices = Array.isArray(payload.choices) ? payload.choices.map((item: unknown) => String(item)) : []
         const choices = rawChoices.length > 0 ? rawChoices : ['once', 'session', 'deny']
-        if (!approvalId) {
-          finish({ ok: false, event: 'run.failed', output, reasoning, error: 'approval required' })
-          return
-        }
-        if (!choices.includes(choice)) {
-          finish({ ok: false, event: 'run.failed', output, reasoning, error: `approval choice "${choice}" is not available` })
-          return
-        }
         try {
-          const codingAgentResult = codingAgentRunManager.resolveApproval(sessionId, approvalId, choice)
+          if (!approvalId) throw new Error('approval required')
+          if (automaticApprovals.has(approvalId)) return
+          automaticApprovals.add(approvalId)
+          if (!choices.includes(choice)) throw new Error(`approval choice "${choice}" is not available`)
+          const ekkoResult = respondToEkkoToolApproval(sessionId, approvalId, choice)
+          const codingAgentResult = ekkoResult.handled ? ekkoResult : codingAgentRunManager.resolveApproval(sessionId, approvalId, choice)
           const result = codingAgentResult.handled
             ? codingAgentResult
             : await this.bridge.approvalRespond(approvalId, choice)
+          if (!(result as any)?.resolved) throw new Error('Automatic tool approval could not be applied')
           const resolvedPayload = {
             event: 'approval.resolved',
             session_id: sessionId,
@@ -3078,6 +3085,9 @@ export class ChatRunSocket {
             error,
           })
           finish({ ok: false, event: 'run.failed', output, reasoning, error })
+          void this.abortSession(sessionId, error).catch(abortError => {
+            logger.warn(abortError, '[chat-run-socket] failed to abort after automatic approval failure for session %s', sessionId)
+          })
         }
       }
       const onEvent = (event: string, payload: any = {}) => {
@@ -3090,7 +3100,9 @@ export class ChatRunSocket {
           logger.warn(err, '[chat-run-socket] runAndWait event observer failed for session %s', sessionId)
         }
         if (event === 'approval.requested') {
-          void respondToApproval(payload)
+          // Native brokers can resolve synchronously. Let the requested event reach
+          // clients first so a late request cannot overwrite its resolved state.
+          void Promise.resolve().then(() => respondToApproval(payload))
         } else if (event === 'run.completed') {
           finish({
             ok: true,
@@ -3125,7 +3137,7 @@ export class ChatRunSocket {
       const fakeSocket = {
         id: `workflow-run-${sessionId}`,
         connected: true,
-        data: { user: options.user, groupRunIsCurrent: options.groupRunIsCurrent },
+        data: { user: options.user, groupRunIsCurrent: options.groupRunIsCurrent, internalToolApprovalChoice: options.approvalChoice },
         join: () => {},
         to: (room: string) => ({
           emit: (event: string, payload: any) => {
@@ -3136,7 +3148,9 @@ export class ChatRunSocket {
         emit: (event: string, payload: any) => onEvent(event, payload),
       } as unknown as Socket
 
-      this.handleRun(fakeSocket, { ...data, onEvent }, profile, false, undefined, pushTargetId)
+      const handlers = this.runHandlers.get(sessionId) || new Set<Promise<void>>()
+      this.runHandlers.set(sessionId, handlers)
+      const handler = this.handleRun(fakeSocket, { ...data, onEvent }, profile, false, undefined, pushTargetId)
         .catch(err => {
           const error = err instanceof Error ? err.message : String(err)
           const payload = { event: 'run.failed', session_id: sessionId, error }
@@ -3154,12 +3168,24 @@ export class ChatRunSocket {
           })
           finish({ ok: false, event: 'run.failed', error })
         })
+        .finally(() => {
+          handlers.delete(handler)
+          if (!handlers.size && this.runHandlers.get(sessionId) === handlers) this.runHandlers.delete(sessionId)
+        })
+      handlers.add(handler)
     })
   }
 
-  async abortSession(sessionId: string, reason = 'Run canceled'): Promise<void> {
+  async abortSession(sessionId: string, reason = 'Run canceled', options: { waitForTermination?: boolean } = {}): Promise<void> {
     const sid = String(sessionId || '').trim()
     if (!sid) return
+    // Capture native handles before handleAbort unregisters them and emits a
+    // terminal event. Those events release runAndWait before execution unwinds.
+    const termination = options.waitForTermination
+      ? Promise.all([codingAgentRunManager.waitForSessionExit(sid), ...(this.runHandlers.get(sid) || [])])
+      : undefined
+    // Retain the rejection until it can be propagated after abort dispatch.
+    void termination?.catch(() => {})
     this.mobileRunTargets.delete(sid)
     const fakeSocket = {
       id: `workflow-abort-${sid}`,
@@ -3182,6 +3208,7 @@ export class ChatRunSocket {
       event: 'run.failed',
       error: reason,
     })
+    await termination
   }
 
   async disposeSession(sessionId: string): Promise<void> {
@@ -3234,6 +3261,7 @@ export class ChatRunSocket {
       workflowNodeId: state?.webhookWorkflowNodeId,
     })
     if (!isPrivatePersonSession(sessionId)) this.observePetEvent(profile, event, tagged)
+    observePersonPresenceEvent(sessionId, event, tagged)
     this.emitPendingInteraction(profile, event, tagged)
     if (state?.isWorking) {
       state.events.push({ event, data: tagged })
@@ -3555,6 +3583,7 @@ export class ChatRunSocket {
       workflowNodeId: state?.webhookWorkflowNodeId,
     })
     if (!isPrivatePersonSession(sessionId)) this.observePetEvent(profile, event, tagged)
+    observePersonPresenceEvent(sessionId, event, tagged)
     this.emitPendingInteraction(profile, event, tagged)
     this.nsp.to(`session:${sessionId}`).emit(event, tagged)
     if (!this.nsp.adapter.rooms.get(`session:${sessionId}`)?.size && socket.connected) {
@@ -3563,7 +3592,25 @@ export class ChatRunSocket {
   }
 
   private emitPendingInteraction(profile: string, event: string, payload: any) {
-    if (isPrivatePersonSession(payload?.session_id)) return
+    if (isPrivatePersonSession(payload?.session_id)) {
+      const session = getSession(payload.session_id)
+      const userId = Number(session?.studio_user_id)
+      if (session?.id !== payload.session_id || !ownsPersonSession(userId, session) || payload.replayed || payload.restored || payload.background_snapshot) return
+      const interaction = ['approval.requested', 'approval.resolved', 'clarify.requested', 'clarify.resolved'].includes(event)
+      const notice = foregroundNotification(event, payload)
+      if (!interaction && (!notice || ['cancelled', 'canceled'].includes(payload.stop_reason))) return
+      const name = `person.${event.replace('clarify.', 'clarification.')}`
+      const preview = event === 'run.completed' ? { ...payload, output: chatCompletionText({ type: name,
+        subject: { session_id: session!.id, message_id: payload.message_id }, payload }) } : payload
+      const data = interaction ? { ...payload, event: name }
+        : { event: name, session_id: session!.id, run_id: payload.run_id, notification_id: notice!.id,
+          timestamp: Date.now(), output: foregroundNotificationPreview(notice!.kind, session, preview).content }
+      // Reuse the authenticated chat transports and their existing notification handlers.
+      for (const namespace of ['/chat-run', '/global-agent']) {
+        this.io.of(namespace).to(personNotificationRoom(userId)).emit(name, data)
+      }
+      return
+    }
     this.emitSessionActivity(profile, event, payload)
     if (event !== 'approval.requested' && event !== 'approval.resolved'
       && event !== 'clarify.requested' && event !== 'clarify.resolved'

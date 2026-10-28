@@ -1,5 +1,6 @@
 import { personUpdated } from './person-updates'
 import { personSessionId } from '../contracts/person-session'
+import { recordPersonOutcome } from './person-presence-store'
 import { createHash, randomUUID } from 'node:crypto'
 import { getDb } from '../infrastructure/database'
 import { PERSON_DEFAULTS, personError } from '../contracts/person'
@@ -38,7 +39,9 @@ export function personOperation<T>(userId: number, key: string, input: unknown, 
 }
 export function personSettings(userId: number): { settings: PersonSettings; revision: number } {
   const row = personDb().prepare('SELECT * FROM person_accounts WHERE user_id=?').get(userId) as { settings_json: string; revision: number } | undefined
-  return { settings: row ? { ...PERSON_DEFAULTS, ...JSON.parse(row.settings_json) } : { ...PERSON_DEFAULTS }, revision: row?.revision || 0 }
+  // Historical fixed budgets must not cap the selected model's context window.
+  const { contextTokens: _legacyBudget, ...saved } = row ? JSON.parse(row.settings_json) : {}
+  return { settings: { ...PERSON_DEFAULTS, ...saved }, revision: row?.revision || 0 }
 }
 export function savePersonSettings(userId: number, settings: PersonSettings, revision: number, workspace?: string) {
   return personTransaction(() => {
@@ -55,37 +58,20 @@ export function savePersonSettings(userId: number, settings: PersonSettings, rev
     return personSettings(userId)
   })
 }
-export function searchPersonContext(userId: number, query: string) {
-  return personDb().prepare("SELECT id,role,substr(content,1,2000) AS content,timestamp * 1000 AS created_at FROM messages WHERE session_id=? AND role IN ('user','assistant') AND instr(lower(content),lower(?))>0 ORDER BY id DESC LIMIT 8").all(personSessionId(userId), query)
-}
-export function personMemories(userId: number, query = '') {
-  return personDb().prepare('SELECT * FROM person_memories WHERE owner_user_id=? AND instr(lower(content),lower(?))>0 ORDER BY updated_at DESC LIMIT 20').all(userId, query)
-}
-export function changePersonMemory(userId: number, input: { id?: string; content?: string; source: string; revision?: number; forget?: boolean }) {
-  const db = personDb(); const now = Date.now()
-  if (!input.id) {
-    if (input.forget || !input.content) throw personError('Memory ID and revision required')
-    if (Number((db.prepare('SELECT COUNT(*) AS n FROM person_memories WHERE owner_user_id=?').get(userId) as { n: number }).n) >= 500) throw personError('Memory limit reached')
-    const id = randomUUID()
-    db.prepare('INSERT INTO person_memories VALUES (?,?,?,?,0,?,?)').run(id, userId, input.content!, input.source, now, now)
-    return { id, revision: 0 }
-  }
-  const result = input.forget
-    ? db.prepare('DELETE FROM person_memories WHERE id=? AND owner_user_id=? AND revision=?').run(input.id, userId, input.revision!)
-    : db.prepare('UPDATE person_memories SET content=?,source=?,revision=revision+1,updated_at=? WHERE id=? AND owner_user_id=? AND revision=?')
-      .run(input.content!, input.source, now, input.id, userId, input.revision!)
-  if (!result.changes) throw personError('Memory not found or changed', 409)
-  return { id: input.id, revision: input.revision! + 1, deleted: !!input.forget }
-}
+const executionOrder = "CASE WHEN state IN ('finished','failed','interrupted') THEN 2 WHEN state='pending' THEN 1 ELSE 0 END,created_at DESC,rowid DESC"
+const taskExecutionColumns = `
+  (SELECT id FROM person_executions e WHERE e.task_id=t.id ORDER BY ${executionOrder} LIMIT 1) AS execution_id,
+  COALESCE((SELECT state FROM person_executions e WHERE e.task_id=t.id ORDER BY ${executionOrder} LIMIT 1),'idle') AS execution_state,
+  (SELECT COUNT(*) FROM person_executions e WHERE e.task_id=t.id AND e.state='pending') AS pending_count,
+  EXISTS(SELECT 1 FROM person_executions e WHERE e.task_id=t.id AND e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval'))
+    OR EXISTS(SELECT 1 FROM person_deliveries d JOIN person_executions e ON e.id=d.execution_id WHERE e.task_id=t.id AND d.state IN ('pending','queued')) AS running`
 export function getPersonTask(userId: number, id: string): PersonTask {
-  const task = personDb().prepare('SELECT * FROM session_tasks WHERE id=? AND owner_user_id=? AND bot_id=?').get(id, userId, `person:${userId}`) as unknown as PersonTask | undefined
+  const task = personDb().prepare(`SELECT t.*, ${taskExecutionColumns} FROM session_tasks t WHERE id=? AND owner_user_id=? AND bot_id=?`).get(id, userId, `person:${userId}`) as unknown as PersonTask | undefined
   if (!task) throw personError('Task not found', 404)
   return task
 }
 export function listPersonTasks(userId: number, search = '', offset = 0, options: { status?: string; order?: string; limit?: number } = {}): PersonTask[] {
-  return personDb().prepare(`SELECT t.*, COALESCE((SELECT state FROM person_executions e WHERE e.task_id=t.id ORDER BY created_at DESC,rowid DESC LIMIT 1),'idle') AS execution_state,
-    EXISTS(SELECT 1 FROM person_executions e WHERE e.task_id=t.id AND e.state IN ('queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval'))
-      OR EXISTS(SELECT 1 FROM person_deliveries d JOIN person_executions e ON e.id=d.execution_id WHERE e.task_id=t.id AND d.state IN ('pending','queued')) AS running
+  return personDb().prepare(`SELECT t.*, ${taskExecutionColumns}
     FROM session_tasks t WHERE owner_user_id=? AND bot_id=? AND (instr(lower(title),lower(?))>0 OR instr(lower(summary),lower(?))>0)
     AND (?='' OR status=?) ORDER BY updated_at ${options.order === 'oldest' ? 'ASC' : 'DESC'},id LIMIT ? OFFSET ?`).all(userId, `person:${userId}`, search, search, options.status || '', options.status || '', Math.max(1, Math.min(100, Number(options.limit) || 20)), offset) as unknown as PersonTask[]
 }
@@ -102,16 +88,31 @@ export function updatePersonTask(userId: number, id: string, revision: number, r
   if (!changed.changes) throw personError('Task changed or is closed', 409)
   return getPersonTask(userId, id)
 }
-export function enqueuePersonExecution(task: PersonTask, occurrence: string | null = null, input?: import('../contracts/runs/session').ContentBlock[]): PersonExecution {
+export function enqueuePersonExecution(task: PersonTask, occurrence: string | null = null, input?: import('../contracts/runs/session').ContentBlock[], followup = false): PersonExecution {
   if (task.status !== 'open') throw personError('Task must be open', 409)
   const id = randomUUID(); const now = Date.now()
-  const active = personDb().prepare("SELECT id FROM person_executions WHERE task_id=? AND state IN ('queued','starting','stopping','running','waiting_person','waiting_user','waiting_approval')").get(task.id)
-  if (active) throw personError('Task already has an active execution', 409)
+  const active = personDb().prepare("SELECT id FROM person_executions WHERE task_id=? AND state IN ('pending','queued','starting','stopping','running','waiting_person','waiting_user','waiting_approval')").get(task.id)
+  if (active && !followup) throw personError('Task already has an active execution', 409)
+  if (Number(task.pending_count) >= 20) throw personError('Task follow-up queue is full', 409)
   personDb().prepare(`INSERT INTO person_executions(id,task_id,owner_user_id,requirements_revision,state,session_id,selection_json,created_at,updated_at,occurrence_id,input_json)
-    VALUES (?,?,?,?,'queued',?,?,?,?,?,?)`).run(id, task.id, task.owner_user_id, task.requirements_revision, `person-task-${task.id}`, task.selection_json, now, now, occurrence, input ? JSON.stringify(input) : '')
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(id, task.id, task.owner_user_id, task.requirements_revision, active ? 'pending' : 'queued', `person-task-${task.id}`, task.selection_json, now, now, occurrence, input ? JSON.stringify(input) : '')
   personDb().prepare(`INSERT INTO person_deliveries(execution_id,owner_user_id,origin_json,updated_at)
     SELECT ?,owner_user_id,origin_json,? FROM person_task_origins WHERE task_id=?`).run(id, now, task.id)
   return getPersonExecution(task.owner_user_id, id)
+}
+/** Pending turns are durable but never compete with the active runtime lease. */
+export function promotePersonFollowups() {
+  personDb().prepare(`UPDATE person_executions SET state='queued',updated_at=? WHERE id IN (
+    SELECT e.id FROM person_executions e JOIN session_tasks t ON t.id=e.task_id
+    WHERE e.state='pending' AND t.status='open' AND e.requirements_revision=t.requirements_revision
+    AND e.rowid=(SELECT p.rowid FROM person_executions p WHERE p.task_id=e.task_id AND p.state='pending' ORDER BY created_at,rowid LIMIT 1)
+    AND NOT EXISTS(SELECT 1 FROM person_executions a WHERE a.task_id=e.task_id AND a.state IN ('queued','starting','stopping','running','waiting_person','waiting_user','waiting_approval'))
+  )`).run(Date.now())
+}
+export function pendingPersonInputs(userId: number, taskId: string) {
+  getPersonTask(userId, taskId)
+  return (personDb().prepare("SELECT id,input_json FROM person_executions WHERE owner_user_id=? AND task_id=? AND state IN ('pending','queued') AND input_json!='' ORDER BY created_at,rowid").all(userId, taskId) as { id: string; input_json: string }[])
+    .map(row => ({ id: row.id, input: JSON.parse(row.input_json) as import('../contracts/runs/session').ContentBlock[] }))
 }
 export function getPersonExecution(userId: number, id: string): PersonExecution {
   const row = personDb().prepare('SELECT * FROM person_executions WHERE id=? AND owner_user_id=?').get(id, userId) as unknown as PersonExecution | undefined
@@ -124,9 +125,11 @@ export function taskPersonExecutions(userId: number, taskId: string): PersonExec
 }
 export function setPersonExecution(run: PersonExecution, state: PersonRunState, extra: { output?: string; error?: string } = {}): boolean {
   personUpdated(run.owner_user_id)
-  return !!personDb().prepare(`UPDATE person_executions SET state=?,output=?,error=?,updated_at=?
+  const changed = !!personDb().prepare(`UPDATE person_executions SET state=?,output=?,error=?,updated_at=?
     WHERE id=? AND owner_user_id=? AND generation=? AND state NOT IN ('interrupted','stopping','finished','failed')`)
     .run(state, extra.output ?? run.output, extra.error ?? run.error, Date.now(), run.id, run.owner_user_id, run.generation).changes
+  if (changed && (state === 'finished' || state === 'failed')) recordPersonOutcome(run.owner_user_id, `task:${run.id}`, state === 'finished' ? 'done' : 'error')
+  return changed
 }
 export function personEvent(run: PersonExecution, kind: string, payload: unknown) {
   const json = JSON.stringify(payload, (key, value) => /token|secret|authorization|api[_-]?key/i.test(key) ? '[redacted]' : value) || '{}'
@@ -191,6 +194,6 @@ export function personBackgroundPendingCount(sessionId: string, reportingExecuti
 }
 export function personTaskRunning(taskId: string): boolean {
   return !!personDb().prepare(`SELECT 1 FROM person_executions e WHERE e.task_id=? AND
-    (e.state IN ('queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval')
+    (e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval')
       OR EXISTS(SELECT 1 FROM person_deliveries d WHERE d.execution_id=e.id AND d.state IN ('pending','queued'))) LIMIT 1`).get(taskId)
 }

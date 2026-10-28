@@ -174,7 +174,7 @@
     },
     {
       "name": "JEV",
-      "description": "Profile-scoped TypeSafe JEV configuration and shared Choice, Score, Noul evaluations"
+      "description": "Global TypeSafe JEV configuration and shared Choice, Score, Noul evaluations"
     },
     {
       "name": "Media",
@@ -16277,7 +16277,7 @@
           "JEV"
         ],
         "summary": "Create match",
-        "description": "POST /api/studio/jev/browser/match",
+        "description": "Uses the shared global JEV configuration, independent of model Profile. Configuration writes and connection tests require super administrator privileges.",
         "operationId": "matchBrowser",
         "security": [
           {
@@ -16286,7 +16286,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Advisory, Profile-gated assessment of supplied snapshot evidence. Never executes actions or changes their completion status.",
+            "description": "Advisory, globally configured assessment of supplied snapshot evidence. Never executes actions or changes their completion status.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16405,17 +16405,7 @@
             }
           }
         },
-        "parameters": [
-          {
-            "name": "X-Hermes-Profile",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Authorized Profile; never changes the global active Profile."
-          }
-        ],
+        "parameters": [],
         "requestBody": {
           "required": true,
           "content": {
@@ -16500,7 +16490,7 @@
           "JEV"
         ],
         "summary": "Create verify",
-        "description": "POST /api/studio/jev/browser/verify",
+        "description": "Uses the shared global JEV configuration, independent of model Profile. Configuration writes and connection tests require super administrator privileges.",
         "operationId": "verifyBrowser",
         "security": [
           {
@@ -16509,7 +16499,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Advisory, Profile-gated assessment of supplied snapshot evidence. Never executes actions or changes their completion status.",
+            "description": "Advisory, globally configured assessment of supplied snapshot evidence. Never executes actions or changes their completion status.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16629,17 +16619,7 @@
             }
           }
         },
-        "parameters": [
-          {
-            "name": "X-Hermes-Profile",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Authorized Profile; never changes the global active Profile."
-          }
-        ],
+        "parameters": [],
         "requestBody": {
           "required": true,
           "content": {
@@ -16724,7 +16704,7 @@
           "JEV"
         ],
         "summary": "Create evaluate",
-        "description": "POST /api/studio/jev/evaluate",
+        "description": "Uses the shared global JEV configuration, independent of model Profile. Configuration writes and connection tests require super administrator privileges.",
         "operationId": "evaluate",
         "security": [
           {
@@ -16867,17 +16847,7 @@
             }
           }
         },
-        "parameters": [
-          {
-            "name": "X-Hermes-Profile",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Authorized Profile; never changes the global active Profile."
-          }
-        ]
+        "parameters": []
       }
     },
     "/api/studio/jev/settings": {
@@ -16886,7 +16856,7 @@
           "JEV"
         ],
         "summary": "Get settings",
-        "description": "GET /api/studio/jev/settings",
+        "description": "Uses the shared global JEV configuration, independent of model Profile. Configuration writes and connection tests require super administrator privileges.",
         "operationId": "getSettings",
         "security": [
           {
@@ -16901,6 +16871,56 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "personMemoryEnabled": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "personMemoryKindRoutingEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryRelevanceFilterEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryRerankEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryWriteReviewEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryCandidateLimit": {
+                      "type": "integer",
+                      "default": 20,
+                      "minimum": 1,
+                      "maximum": 50
+                    },
+                    "personMemoryRecallMinConfidence": {
+                      "type": "number",
+                      "default": 0.5,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "personMemoryFilterMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "personMemoryMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "personMemoryTimeoutMs": {
+                      "type": "integer",
+                      "default": 3000,
+                      "minimum": 100,
+                      "maximum": 30000
+                    },
                     "ekkoComputerUseMatchEnabled": {
                       "type": "boolean",
                       "default": false
@@ -17084,24 +17104,14 @@
             }
           }
         },
-        "parameters": [
-          {
-            "name": "X-Hermes-Profile",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Authorized Profile; never changes the global active Profile."
-          }
-        ]
+        "parameters": []
       },
       "put": {
         "tags": [
           "JEV"
         ],
         "summary": "Update settings",
-        "description": "PUT /api/studio/jev/settings",
+        "description": "Uses the shared global JEV configuration, independent of model Profile. Configuration writes and connection tests require super administrator privileges.",
         "operationId": "saveSettings",
         "security": [
           {
@@ -17116,6 +17126,56 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "personMemoryEnabled": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "personMemoryKindRoutingEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryRelevanceFilterEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryRerankEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryWriteReviewEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryCandidateLimit": {
+                      "type": "integer",
+                      "default": 20,
+                      "minimum": 1,
+                      "maximum": 50
+                    },
+                    "personMemoryRecallMinConfidence": {
+                      "type": "number",
+                      "default": 0.5,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "personMemoryFilterMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "personMemoryMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "personMemoryTimeoutMs": {
+                      "type": "integer",
+                      "default": 3000,
+                      "minimum": 100,
+                      "maximum": 30000
+                    },
                     "ekkoComputerUseMatchEnabled": {
                       "type": "boolean",
                       "default": false
@@ -17304,6 +17364,56 @@
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
+                  "personMemoryEnabled": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "personMemoryKindRoutingEnabled": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "personMemoryRelevanceFilterEnabled": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "personMemoryRerankEnabled": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "personMemoryWriteReviewEnabled": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "personMemoryCandidateLimit": {
+                    "type": "integer",
+                    "default": 20,
+                    "minimum": 1,
+                    "maximum": 50
+                  },
+                  "personMemoryRecallMinConfidence": {
+                    "type": "number",
+                    "default": 0.5,
+                    "minimum": 0.5,
+                    "maximum": 1
+                  },
+                  "personMemoryFilterMinConfidence": {
+                    "type": "number",
+                    "default": 0.8,
+                    "minimum": 0.5,
+                    "maximum": 1
+                  },
+                  "personMemoryMinConfidence": {
+                    "type": "number",
+                    "default": 0.8,
+                    "minimum": 0.5,
+                    "maximum": 1
+                  },
+                  "personMemoryTimeoutMs": {
+                    "type": "integer",
+                    "default": 3000,
+                    "minimum": 100,
+                    "maximum": 30000
+                  },
                   "ekkoComputerUseMatchEnabled": {
                     "type": "boolean",
                     "default": false
@@ -17406,24 +17516,14 @@
             }
           }
         },
-        "parameters": [
-          {
-            "name": "X-Hermes-Profile",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Authorized Profile; never changes the global active Profile."
-          }
-        ]
+        "parameters": []
       },
       "delete": {
         "tags": [
           "JEV"
         ],
         "summary": "Delete settings",
-        "description": "DELETE /api/studio/jev/settings",
+        "description": "Uses the shared global JEV configuration, independent of model Profile. Configuration writes and connection tests require super administrator privileges.",
         "operationId": "deleteSettings",
         "security": [
           {
@@ -17438,6 +17538,56 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "personMemoryEnabled": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "personMemoryKindRoutingEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryRelevanceFilterEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryRerankEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryWriteReviewEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryCandidateLimit": {
+                      "type": "integer",
+                      "default": 20,
+                      "minimum": 1,
+                      "maximum": 50
+                    },
+                    "personMemoryRecallMinConfidence": {
+                      "type": "number",
+                      "default": 0.5,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "personMemoryFilterMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "personMemoryMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "personMemoryTimeoutMs": {
+                      "type": "integer",
+                      "default": 3000,
+                      "minimum": 100,
+                      "maximum": 30000
+                    },
                     "ekkoComputerUseMatchEnabled": {
                       "type": "boolean",
                       "default": false
@@ -17618,17 +17768,7 @@
             }
           }
         },
-        "parameters": [
-          {
-            "name": "X-Hermes-Profile",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Authorized Profile; never changes the global active Profile."
-          }
-        ]
+        "parameters": []
       }
     },
     "/api/studio/jev/test": {
@@ -17637,7 +17777,7 @@
           "JEV"
         ],
         "summary": "Create test",
-        "description": "POST /api/studio/jev/test",
+        "description": "Uses the shared global JEV configuration, independent of model Profile. Configuration writes and connection tests require super administrator privileges.",
         "operationId": "testConnection",
         "security": [
           {
@@ -17722,17 +17862,7 @@
             }
           }
         },
-        "parameters": [
-          {
-            "name": "X-Hermes-Profile",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Authorized Profile; never changes the global active Profile."
-          }
-        ]
+        "parameters": []
       }
     },
     "/api/studio/live-activities/registration": {
@@ -19350,8 +19480,8 @@
         "tags": [
           "Person"
         ],
-        "summary": "Create memory",
-        "description": "Studio user login required. Account isolation is enforced by the server. Mutations use current revisions; task and schedule operations require an idempotency key. Worker question answers are delivered through their original interactive runtime.",
+        "summary": "Delete Person memory",
+        "description": "Studio user login required. Permanently delete one account-owned memory card at its current revision. New memories and corrections are made through the Person conversation.",
         "operationId": "memory",
         "security": [
           {
@@ -19379,19 +19509,22 @@
                   "id": {
                     "type": "string"
                   },
-                  "content": {
-                    "type": "string",
-                    "maxLength": 2000
-                  },
                   "forget": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
                   },
                   "expected_revision": {
                     "type": "integer",
-                    "minimum": 0
+                    "minimum": 1
                   }
                 },
-                "required": []
+                "required": [
+                  "id",
+                  "forget",
+                  "expected_revision"
+                ]
               }
             }
           }
@@ -19652,10 +19785,12 @@
                     "minimum": 2,
                     "maximum": 30
                   },
-                  "contextTokens": {
-                    "type": "integer",
-                    "minimum": 8000,
-                    "maximum": 64000
+                  "compressionThreshold": {
+                    "type": "number",
+                    "nullable": true,
+                    "minimum": 0.05,
+                    "maximum": 0.95,
+                    "description": "Fraction of the current interaction model context window that triggers compression; null inherits the global threshold. Model capacity is resolved automatically."
                   },
                   "maxConcurrentTasks": {
                     "type": "integer",
@@ -19710,6 +19845,7 @@
                       "adopt",
                       "update",
                       "start",
+                      "stop",
                       "close",
                       "reopen"
                     ]
@@ -19725,12 +19861,16 @@
                   "task_id": {
                     "type": "string"
                   },
+                  "execution_id": {
+                    "type": "string",
+                    "description": "Required with task_id and expected_revision for stop; query the current execution first. Stops only this occurrence, keeping the goal and future schedules."
+                  },
                   "schedule_id": {
                     "type": "string"
                   },
                   "agent_id": {
                     "type": "string",
-                    "description": "Configured execution agent ID; omitted selects the sole preset or default Ekko Agent"
+                    "description": "Configured execution agent ID; omitted selects the sole saved preset. At least one preset is required."
                   },
                   "title": {
                     "type": "string",

@@ -86,7 +86,7 @@ const tagMappings = {
   'modules/studio/routes/chat-webhooks.ts': { name: 'Chat Webhooks', description: 'Cross-agent Chat Run webhook endpoint management' },
   'modules/studio/routes/tts.ts': { name: 'TTS', description: 'Text-to-speech generation and settings' },
   'modules/studio/routes/stt.ts': { name: 'STT', description: 'Speech-to-text transcription and settings' },
-  'modules/studio/routes/jev.ts': { name: 'JEV', description: 'Profile-scoped TypeSafe JEV configuration and shared Choice, Score, Noul evaluations' },
+  'modules/studio/routes/jev.ts': { name: 'JEV', description: 'Global TypeSafe JEV configuration and shared Choice, Score, Noul evaluations' },
   'modules/studio/routes/media.ts': { name: 'Media', description: 'Media generation endpoints' },
   'modules/studio/routes/performance-monitor.ts': { name: 'Performance', description: 'Runtime performance monitoring' },
   'modules/studio/routes/petdex.ts': { name: 'Petdex', description: 'Desktop pet catalog and assets' },
@@ -1487,6 +1487,16 @@ for (const [path, methods] of Object.entries(openapi.paths)) {
 
 // JEV accepts named heterogeneous questions and never returns its stored API key.
 const jevSettingsProperties = {
+  personMemoryEnabled: { type: 'boolean', default: false },
+  personMemoryKindRoutingEnabled: { type: 'boolean', default: true },
+  personMemoryRelevanceFilterEnabled: { type: 'boolean', default: true },
+  personMemoryRerankEnabled: { type: 'boolean', default: true },
+  personMemoryWriteReviewEnabled: { type: 'boolean', default: true },
+  personMemoryCandidateLimit: { type: 'integer', default: 20, minimum: 1, maximum: 50 },
+  personMemoryRecallMinConfidence: { type: 'number', default: 0.5, minimum: 0.5, maximum: 1 },
+  personMemoryFilterMinConfidence: { type: 'number', default: 0.8, minimum: 0.5, maximum: 1 },
+  personMemoryMinConfidence: { type: 'number', default: 0.8, minimum: 0.5, maximum: 1 },
+  personMemoryTimeoutMs: { type: 'integer', default: 3000, minimum: 100, maximum: 30000 },
   ekkoComputerUseMatchEnabled: { type: 'boolean', default: false },
   ekkoComputerUseMatchCandidateLimit: { type: 'integer', default: 20, minimum: 1, maximum: 50 },
   ekkoComputerUseMatchMinConfidence: { type: 'number', default: 0.8, minimum: 0.5, maximum: 1 },
@@ -1515,7 +1525,8 @@ openapi.components.schemas.JevError = {
 for (const [path, methods] of Object.entries(openapi.paths)) {
   if (!path.startsWith('/api/studio/jev/')) continue
   for (const [method, operation] of Object.entries(methods)) {
-    operation.parameters = [{ name: 'X-Hermes-Profile', in: 'header', required: true, schema: { type: 'string' }, description: 'Authorized Profile; never changes the global active Profile.' }]
+    operation.parameters = []
+    operation.description = 'Uses the shared global JEV configuration, independent of model Profile. Configuration writes and connection tests require super administrator privileges.'
     if (path.endsWith('/settings')) {
       operation.responses['200'] = { description: 'Non-secret JEV settings', content: { 'application/json': { schema: jevSettingsSchema } } }
       if (method === 'put') operation.requestBody = { required: true, content: { 'application/json': { schema: {
@@ -1539,7 +1550,7 @@ for (const [path, methods] of Object.entries(openapi.paths)) {
           } },
         },
       } } } }
-      operation.responses['200'] = { description: 'Advisory, Profile-gated assessment of supplied snapshot evidence. Never executes actions or changes their completion status.', content: { 'application/json': { schema: {
+      operation.responses['200'] = { description: 'Advisory, globally configured assessment of supplied snapshot evidence. Never executes actions or changes their completion status.', content: { 'application/json': { schema: {
         type: 'object', required: ['tabId', 'snapshotId', 'status'], properties: {
           tabId: { type: 'string' }, snapshotId: { type: 'string' },
           status: { type: 'string', enum: intent === 'target' ? ['matched', 'no_match', 'skipped', 'unavailable'] : ['met', 'not_met', 'unknown', 'skipped', 'unavailable'] },
@@ -1963,19 +1974,19 @@ for (const action of ['list', 'update']) {
 // Person uses account identity from the login token; profile/model refs are resources, never ownership.
 const personFields = {
   action: { type: 'string' }, idempotency_key: { type: 'string', maxLength: 200 }, expected_revision: { type: 'integer', minimum: 0 },
-  task_id: { type: 'string' }, schedule_id: { type: 'string' }, agent_id: { type: 'string', description: 'Configured execution agent ID; omitted selects the sole preset or default Ekko Agent' },
+  task_id: { type: 'string' }, execution_id: { type: 'string', description: 'Required with task_id and expected_revision for stop; query the current execution first. Stops only this occurrence, keeping the goal and future schedules.' }, schedule_id: { type: 'string' }, agent_id: { type: 'string', description: 'Configured execution agent ID; omitted selects the sole saved preset. At least one preset is required.' },
   title: { type: 'string', maxLength: 200 }, goal: { type: 'string', maxLength: 8000 },
   start: { type: 'boolean', default: true },
 }
 const personBodies = {
   '/clear': {fields:{expected_history_revision:{type:'integer',minimum:0}},required:['expected_history_revision']},
-  '/settings': { fields: { workspace: {type:'string',maxLength:4000,description:'Shared absolute working directory for all Person background tasks; empty restores the account private workspace. Requires all tasks and deliveries to be idle. Existing tasks use it on their next execution.'}, agents: {type:'array', maxItems:20, description:'Execution presets; an empty list inherits Person provider/model through Ekko Agent', items:{type:'object',required:['id','name','description','selection'],properties:{id:{type:'string'},name:{type:'string'},description:{type:'string'},selection:{type:'object',required:['runtime','mode','profile','model'],properties:{runtime:{type:'string'},mode:{type:'string',enum:['scoped','global']},profile:{type:'string'},provider:{type:'string'},model:{type:'string'},reasoningEffort:{type:'string'}}}}}}, use_global_default: {type:'boolean'}, model: {type:'object',properties:{profile:{type:'string'},provider:{type:'string'},model:{type:'string'}},required:['profile','provider','model']}, reasoning_effort: {type:'string',enum:['','none','minimal','low','medium','high','xhigh','max']}, expected_revision: personFields.expected_revision, timezone: { type:'string' }, maxSteps:{type:'integer',minimum:2,maximum:30}, contextTokens:{type:'integer',minimum:8000,maximum:64000},maxConcurrentTasks:{type:'integer',minimum:1,maximum:4} }, required:['expected_revision'], method:'put' },
+  '/settings': { fields: { workspace: {type:'string',maxLength:4000,description:'Shared absolute working directory for all Person background tasks; empty restores the account private workspace. Requires all tasks and deliveries to be idle. Existing tasks use it on their next execution.'}, agents: {type:'array', maxItems:20, description:'Execution presets; an empty list inherits Person provider/model through Ekko Agent', items:{type:'object',required:['id','name','description','selection'],properties:{id:{type:'string'},name:{type:'string'},description:{type:'string'},selection:{type:'object',required:['runtime','mode','profile','model'],properties:{runtime:{type:'string'},mode:{type:'string',enum:['scoped','global']},profile:{type:'string'},provider:{type:'string'},model:{type:'string'},reasoningEffort:{type:'string'}}}}}}, use_global_default: {type:'boolean'}, model: {type:'object',properties:{profile:{type:'string'},provider:{type:'string'},model:{type:'string'}},required:['profile','provider','model']}, reasoning_effort: {type:'string',enum:['','none','minimal','low','medium','high','xhigh','max']}, expected_revision: personFields.expected_revision, timezone: { type:'string' }, maxSteps:{type:'integer',minimum:2,maximum:30}, compressionThreshold:{type:'number',nullable:true,minimum:0.05,maximum:0.95,description:'Fraction of the current interaction model context window that triggers compression; null inherits the global threshold. Model capacity is resolved automatically.'},maxConcurrentTasks:{type:'integer',minimum:1,maximum:4} }, required:['expected_revision'], method:'put' },
   '/tasks/{id}/chat': {fields:{input:{type:'array',minItems:1,maxItems:50,items:{oneOf:[{type:'object',required:['type','text'],properties:{type:{type:'string',enum:['text']},text:{type:'string',maxLength:32000}}},{type:'object',required:['type','name','path'],properties:{type:{type:'string',enum:['file','image']},name:{type:'string'},path:{type:'string'},media_type:{type:'string'},context:{type:'string'},video_frame:{type:'boolean'}}}]}},expected_revision:personFields.expected_revision,idempotency_key:personFields.idempotency_key},required:['input','expected_revision','idempotency_key']},
   '/tasks/query': {fields:{search:{type:'string'},offset:{type:'integer',minimum:0},status:{type:'string',enum:['','open','completed','closed']},order:{type:'string',enum:['newest','oldest']},limit:{type:'integer',minimum:1,maximum:100}}},
-  '/tasks/apply': {fields:{...personFields,action:{type:'string',enum:['create','adopt','update','start','close','reopen']}},required:['action','idempotency_key']},
+  '/tasks/apply': {fields:{...personFields,action:{type:'string',enum:['create','adopt','update','start','stop','close','reopen']}},required:['action','idempotency_key']},
   '/schedules/apply': {fields:{action:{type:'string',enum:['create','update','pause','resume','cancel']},idempotency_key:personFields.idempotency_key,expected_revision:personFields.expected_revision,task_id:personFields.task_id,schedule_id:personFields.schedule_id,kind:{type:'string',enum:['once','cron']},expression:{type:'string',description:'ISO date with offset or five-field cron'},timezone:{type:'string'},misfire:{type:'string',enum:['skip','run_latest']}},required:['action','idempotency_key']},
   '/interactions/{id}/answer': {fields:{answer:{type:'string',maxLength:4000},expected_revision:personFields.expected_revision},required:['answer','expected_revision']},
-  '/memory': {fields:{id:{type:'string'},content:{type:'string',maxLength:2000},forget:{type:'boolean'},expected_revision:personFields.expected_revision}},
+  '/memory': {fields:{id:{type:'string'},forget:{type:'boolean',enum:[true]},expected_revision:{type:'integer',minimum:1}},required:['id','forget','expected_revision']},
 }
 for (const [suffix, schema] of Object.entries(personBodies)) {
   const operation = openapi.paths['/api/studio/person'+suffix]?.[schema.method || 'post']
@@ -1984,6 +1995,8 @@ for (const [suffix, schema] of Object.entries(personBodies)) {
   operation.description='Studio user login required. Account isolation is enforced by the server. Mutations use current revisions; task and schedule operations require an idempotency key. Worker question answers are delivered through their original interactive runtime.'
 }
 
+openapi.paths['/api/studio/person/memory'].post.summary = 'Delete Person memory'
+openapi.paths['/api/studio/person/memory'].post.description = 'Studio user login required. Permanently delete one account-owned memory card at its current revision. New memories and corrections are made through the Person conversation.'
 openapi.paths['/api/studio/person/tasks/{id}/chat'].get.description = 'Open the account-owned hidden task conversation. Returns task and session metadata for standard socket resume. It stays excluded from ordinary session lists. Read-only history is permitted to its owner; direct run, abort and other session mutations remain forbidden.'
 openapi.paths['/api/studio/person/tasks/{id}/chat'].post.description = 'Continue an idle, non-closed task in the same hidden worker session through the durable background runner. Completed tasks reopen automatically on new input. Running tasks, pending result delivery and stale revisions return 409. Completion wakes the original Person main session again.'
 
