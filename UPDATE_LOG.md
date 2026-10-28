@@ -5,6 +5,39 @@
 
 ---
 
+## 2026-10-28（第二轮）· 再同步上游 8 个提交 + 修复环境探测误判 + 4 台对齐
+
+### 上游同步
+- 上游仓库：`EKKOLearnAI/ekko-studio`（`hermes-studio` 已改名，旧地址 404）`main`
+- 合并提交数：**8 个**（#3554 #3560 #3562 #3563 #3551 #3565 #3564 #3566），209 个文件
+- 版本：仍 **0.7.39**；依赖清单**无变化** → 跳过 `npm install`
+- 合并：`git merge upstream/main`，**merge-tree 预演 0 冲突、实际 0 冲突**，合并提交 `531d71ce`
+- 自研自检：**14/14 PASS**（新增 ⑨）
+
+### 新增自研 ⑨（fork 补丁）
+- `coding-agents/services/index.ts` + `studio/services/update/version-preview-manager.ts`：
+  去掉 `text.includes('enoent')` 兜底，只认 `spawn npm` / `spawn node`
+- 根因：探测智能体版本执行 `<cmd> --version`，命令不存在即 `spawn qwen ENOENT`，
+  被误判成「Node/npm 环境缺失」并显示在 4 台机器的 UI 上
+- 用例验证 6/6：`spawn qwen ENOENT → false`、`spawn npm node ENOENT → true`
+
+### 部署（4 台 PVE）
+| 机器 | commit | 版本 | curl 8648 | 备注 |
+|---|---|---|---|---|
+| 931 | `85e3e77c` | 0.7.39 | 200 | 首次误 reset 到 `678ca544`，用 `FETCH_HEAD` 重部署 |
+| 935 | `85e3e77c` | 0.7.39 | 200 | 一次通过 |
+| 936 | `85e3e77c` | 0.7.39 | 200 | restart 必须 root（ubuntu 无 polkit 权限） |
+| 961 | `85e3e77c` | 0.7.39 | 200 | 本机，build 本机完成 |
+
+### 踩坑
+1. 三台 `remote.origin.fetch` 只映射 `refs/heads/main` → `git fetch origin sync` **只写 FETCH_HEAD**，
+   随后 `git reset --hard origin/sync` 会静默回退旧 commit（931 复现，旧源码+新依赖导致 build TS 报错）
+2. 936 以 `ubuntu` 身份 `systemctl restart ekko-studio` 被 polkit 拒；build 通过但服务仍是旧进程
+3. 961 上 `packages/desktop` 无 `node_modules`（缺 electron/@types/node），桌面 `tsc --noEmit` 无法验证，
+   属环境缺失，非代码问题
+
+---
+
 ## 2026-10-28 · 同步上游 0.7.36 → 0.7.39
 
 ### 上游同步

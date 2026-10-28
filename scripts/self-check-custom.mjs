@@ -82,6 +82,11 @@ const CHECKS = [
     file: 'packages/server/src/modules/coding-agents/services/context-policy.ts',
     label: '⑧ 商汤 384000 output cap',
   },
+  {
+    key: "text.includes('spawn node')",
+    file: 'packages/server/src/modules/coding-agents/services/index.ts',
+    label: '⑨ coding-agent 环境探测误判修复(任意ENOENT不再当Node缺失)',
+  },
 ];
 
 function width(s) {

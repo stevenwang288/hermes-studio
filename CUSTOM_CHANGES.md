@@ -5,13 +5,13 @@
 > **详细手册看 [`docs/upstream-sync-and-fleet-deploy.md`](docs/upstream-sync-and-fleet-deploy.md)**。
 > 本文件负责：自研功能清单 + **每轮记账**。
 
-本仓库是 `EKKOLearnAI/hermes-studio` 的 fork，**2026-09-16 全新重建**：以官方 v0.7.21 为基线，只合入自研功能，版本号跟随官方（不做 fork 标记，避免启动提示）。
+本仓库是 `EKKOLearnAI/ekko-studio` 的 fork（原名 `hermes-studio`，上游已改名，旧地址 404），**2026-09-16 全新重建**：以官方 v0.7.21 为基线，只合入自研功能，版本号跟随官方（不做 fork 标记，避免启动提示）。
 
 ## 当前状态（2026-10-16 校准）
 
 | 分支 | 版本 | 说明 |
 |------|------|------|
-| `sync` | **0.7.36** | 唯一有效分支。= 上游 `main` 最新 + 7 项自研功能（③路径显示已移除，改随上游），已通过 `npm run build` + 桌面 `tsc --noEmit` 验证 |
+| `sync` | **0.7.39**（2026-10-28 校准） | 唯一有效分支。= 上游 `main` 最新 + 8 项自研功能（③路径显示已移除；⑨环境探测误判修复 2026-10-28 新增），已通过 `npm run build` + 桌面 `tsc --noEmit` 验证 |
 | `main` | 0.7.21 | 停用的旧基线，**勿用** |
 
 **流程固化（2026-10-15）**：新增 [`SYNC-CHECKLIST.md`](SYNC-CHECKLIST.md)（10 步执行清单，把「推自己的 GitHub」「更新文档记账」两步显式列为不可跳过）+
@@ -22,6 +22,12 @@
 排查中发现该补丁还是**坏的**：它把顶栏 `header-actions` 拆成两个兄弟 div，并重复渲染了一次会话标题；且 `workspace-badge` 的 `v-if` 未排除新建对话页，导致在新建对话页点顶栏路径 chip 改的是**上一个会话**而不是即将新建的对话（用户实测踩到）。
 处置：`ChatPanel.vue` 模板 + 样式全部还原，现 `git diff upstream/main -- packages/client/src/components/hermes/chat/ChatPanel.vue` **为空**（逐字节一致）。自研从 **8 项 → 7 项**，`self-check-custom.mjs` 命点 **14 → 13**（13/13 PASS）。同步更新：`SYNC-CHECKLIST.md`（冲突铁律去掉 `workspace-badge`、自检判据去掉「路径显示」）、`scripts/self-check-custom.mjs`、`docs/upstream-sync-and-fleet-deploy.md`、skill。**编号 ③ 保留不复用。**
 提交 `c9189537` 已推 `origin/sync`；`npm run build` exit=0。**当天二次打包交付**：`Ekko.Studio-0.7.36-x64.exe`（189MB，15:21→15:30）覆盖到 `d:\desk` 并重装本机；安装产物 `resources/webui/dist` 已搜不到 `workspace-badge`（证明确实生效）；启动 19 进程 + 主窗口 PID 4756，`/health`：`status=ok` / `webui_version=0.7.36` / `bridge=ready, running=true`。
+
+**最近一次合并（2026-10-28 13:40 UTC）**：上游仓库已改名 —— `EKKOLearnAI/hermes-studio` **404**，fork 的 parent 现为 **`EKKOLearnAI/ekko-studio`**（同一项目的新名字/新迭代，旧地址不再存在）。本轮合并该仓库 `main` 的 **8 个提交**（#3554 Person 设置重构与上下文/任务加固、#3560 悬浮 zhezhe 后台任务、#3562 JEV 共享+个人助手记忆、#3563 个人助手通知、#3551 stackchan 语音文档、#3565 zhezhe 自我介绍修复、#3564 使用量与 agent logo、#3566 Person 任务续跑+任务工具），209 个文件。**merge-tree 预演 0 冲突，实 merge 也 0 冲突**（仅 `.gitignore`/`package.json` 非重叠自动合并）。版本仍 **0.7.39**；**依赖清单无变化**（`git diff backup..HEAD -- package*.json` 为空）→ 按流程**跳过 `npm install`**。本地 `npm run build` **exit=0**（dist 13:39:46），自研自检 **14/14 PASS**（本轮新增 ⑨）。合并后 HEAD `85e3e77c`，已推 `origin/sync`。
+> **本轮新增自研⑨**：coding-agent 环境探测误判修复（见下方第 8 节）。这是本轮唯一新增的 fork 补丁，因为**上游此 bug 仍在**：任意 `ENOENT` 都会被翻译成 "Node/npm environment was not detected"。
+> **部署与交付（2026-10-28）**：931 `85e3e77c` / 935 `85e3e77c` / 936 `85e3e77c` 全部 build exit=0、服务重启后 `curl 8648` **200**、version=0.7.39、dist mtime 为本轮、`includes("spawn node")`=2 且 `includes("enoent")||...`=0。961 已在本轮构建完成（`85e3e77c`），进程重启后同样生效。
+> **本轮踩的两个坑**：① **`git reset --hard origin/sync` 会静默回退** —— 三台的 `remote.origin.fetch` 只映射了 `refs/heads/main`，`git fetch origin sync` 只写 `FETCH_HEAD`、不更新 `origin/sync`；931 因此被 reset 到旧 commit `678ca544`（0.7.35），且"旧源码 + 新 node_modules"导致 build 报 `PdfFilePreview.vue TS2339` 失败 → 必须 `git rev-parse FETCH_HEAD` 取真实目标再 reset（deploy-one-vm.sh 早已这么做，我手写脚本时重踩了一次）。② **936 的 `systemctl restart ekko-studio` 必须用 root 执行** —— 以 `ubuntu` 身份跑会报 "Access denied as the requested operation requires interactive authentication"，build 成功但服务仍是旧进程，容易误判"已部署"。
+> **961 桌面 tsc 无法验证**：961 上 `packages/desktop` 没有 `node_modules`（缺 `electron` / `@types/node`），`npx tsc` 直接报 800+ 条缺模块错误 → 属**环境缺失**，非本轮代码问题；桌面版验证仍需在 Windows 侧做。
 
 **最近一次合并（2026-10-16）**：上游 0.7.35 → **0.7.36** 共 9 个提交（实时主题定制+可移植主题预设 #3394、TOS 7 包自动构建 #3397、Windows 盘根 workspace 路径处理 #3396、工作流抽屉+聊天主题修复 #3398、Hermes 发布打包修复 #3400、30MB 动态壁纸 #3399、按需加载完整 provider 模型目录 #3401、Studio 侧栏可调宽 #3408、token 过期后 Hermes 群任务计划鉴权修复 #3409）。**唯一冲突 `.gitignore`**（双方各加不同条目，非互斥 → 两边都保留：fork 的本地杂物段 + 上游的 `/release/tos/`）。逐项 grep 确认 **8 项自研全存活**（①preempt×9/4/1/4/2 ②`loadDesktopZoomLevel`×2 ③`workspace-badge`×2 ④`DEFAULT_LINK_OPEN_TARGET`×5 ⑤`ALLOW_ALL_USERS` ⑥`toolCallDelta.id ||` ⑦`_ALWAYS_EAGER`×3 ⑧`384000` cap）。合并后 HEAD `8d95fe2d`，已推 `origin/sync`。本地 `npm run build` + 桌面 `tsc --noEmit` 均 exit=0。
 > **依赖确实变了，所以本轮 `npm install` 是必需的**：上游 0.7.36 新增 `postcss@^8.5.26` + `postcss-scss@^4.0.9`（package.json +2 行）、`package-lock.json` +33 行、新增 `pack:tos`/`verify:tos` 脚本。`npm install` 实加 1 个包。
@@ -150,6 +156,19 @@
 **为什么放 bridge 层而不是改运行时**：改 `desktop-runtime/hermes/<ver>/win-x64/python/tools/tool_search.py` 只对本机生效——新机器装 Studio 下载的是干净官方运行时，Studio 升级下载新版运行时补丁也会丢。bridge 层是 Studio 自带代码（agent 启动必经 `python hermes_bridge.py`），随包分发 → 任何机器任何版本都带。**后续升级 merge 时此文件按自研保留**（bridge 目录上游几乎不动）。
 
 **验证**：干净运行时（0.20.0，无任何补丁）实测：补丁执行后 `_ALWAYS_EAGER_MCP_TOOLSETS` 注入成功、`is_deferrable_tool_name` 被包装。961（0.21.5 新版结构）同款语义。
+
+### 8. coding-agent 环境探测误判修复（2026-10-28 新增）
+
+| 文件 | 改动 |
+|------|------|
+| `packages/server/src/modules/coding-agents/services/index.ts` | `isNodeEnvironmentMissingError()` 去掉 `text.includes('enoent')` 兜底，改为只认 `spawn npm` / `spawn node`（并补上原本缺失的 `spawn node` 分支） |
+| `packages/server/src/modules/studio/services/update/version-preview-manager.ts` | 同一份逻辑的副本，同步修正 |
+
+**问题**：上游用"错误文本里出现 `enoent`"当作"Node/npm 没装"。但探测智能体版本时执行的是 `<cmd> --version`，命令不存在就是 `spawn qwen ENOENT` —— 于是**「这个 CLI 没装」被显示成「Node/npm 环境缺失」**，用户在 4 台机器上都看到这条误导性报错。
+
+**验证**：从线上 `dist/server/index.js` 抽出该函数跑用例 —— `spawn qwen ENOENT → false`、`spawn cursor-agent ENOENT → false`、`spawn npm ENOENT → true`、`spawn node ENOENT → true`、`npm: command not found → true`、普通文件 `ENOENT open /x → false`，6/6 符合预期。
+
+**后续**：该 bug 属上游问题，适合向上游提 PR；合并上游时按自研保留（`scripts/self-check-custom.mjs` ⑨ 已加守卫）。
 
 ---
 
