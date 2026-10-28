@@ -43,6 +43,14 @@
 - 踩坑：上游本次把 `electron-builder.yml` 的 win target 改为 `arch: [x64, arm64]`，arm64 缺原生依赖（sharp/onnx）导致打包失败 → 本 fork 只发布 x64，已把 arch 改回 `[x64]`
 - 踩坑：electron 二进制走代理 10808 下载超时 → 改用 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/` 国内镜像
 - 交付：exe 已拷到 `d:\desk`（D 盘桌面）
+
+### PVE 4 台部署（2026-10-28）
+- 目标：931（/opt/hermes-studio-ekko）、935（/opt/hermes-studio）、936（/opt/hermes-studio-fork）、961（/opt/hermes-studio）**统一方式**更新到 `46f29232` / 0.7.39
+- 统一流程：`git fetch origin sync && git reset --hard <SHA> → npm install --include=dev → npm run build → chown ubuntu → systemctl restart 服务 → 验证`
+- 全程 node **v24.20.0**、npm 用 **npmmirror**、git 走 mihomo 7890 代理，4 台完全一致
+- 结果：**4/4 全部 OK**（HEAD=46f29232、version=0.7.39、服务 active、8648 全 200、dist mtime 均为本轮新构建）
+- 附带修复：**935 翻墙不通**（默认网关 192.168.9.2 ADSL 线路死亡，运行路由表与 netplan(192.168.9.1) 不一致）→ `ip route replace default via 192.168.9.1` 修复，google 直连+代理均恢复 302；同步 935 的 mihomo 订阅到 961 最新版（`5b0fd4d2`）
+- 统一复测翻墙：931/935/936/961 直连+走7890代理连 google 全部 302/204，方式完全一致
 - 本机安装：静默安装 `/S` 成功，`ProductVersion` = **0.7.39.0**，路径 `C:\Users\Administrator\AppData\Local\Programs\Ekko Studio\`
 
 ### 备注
