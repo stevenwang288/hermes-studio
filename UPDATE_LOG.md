@@ -32,6 +32,25 @@
 ### 安装
 - nsis 静默 `/S` 安装到 `C:\Users\Administrator\AppData\Local\Programs\Ekko Studio\`，exe 版本 **0.8.19.0**
 
+### 桌面版模型配置 —— ⚠️ 两个独立位置（重要发现）
+桌面版（0.8.19）的「模型配置」分两处，**用途不同、改模型要两处都动**：
+
+| 位置 | 用途 | 读的时机 |
+|---|---|---|
+| `C:\Users\Administrator\.hermes\config.yaml` → `custom_providers` | **agent 运行时**跑模型（真正发请求） | agent 启动读一次 |
+| `C:\Users\Administrator\.hermes-web-ui\cache\provider-model-catalog.json` | **Web UI 下拉列表展示**（provider editor 可选模型） | Web UI 读缓存 |
+
+- **曾绕远的根因**：改 `config.yaml` 的 `custom_providers.models` **不会改 UI 下拉列表**（下拉读 cache json）——两处不同步会出现「config.yaml 14 个、UI 显示 114 个垃圾」
+- **确证**：桌面版进程 bridge 日志（`~/.hermes-web-ui/logs/bridge.log`）打印 `profile_dir=C:\Users\Administrator\.hermes`、`config_path=...\config.yaml`；Web UI 端口 **8748**
+- `detectHermesHome()`（`runtime/path.ts:21`）：优先 `HERMES_HOME` 环境变量，否则 `~/.hermes`
+
+### 模型对齐 + 垃圾清理（WorkBuddy → Ekko）
+- 把 WorkBuddy `~/.workbuddy/models.json` 的商汤/腾讯两组同步到桌面版**两处**（config.yaml + cache json）：
+  - **商汤（4010）6 个**：`sensenova/deepseek-flash` `glm-5.2` `glm-5.3` `kimi-k3` `sensenova-6.8-flash` `sensenova-u1.5-lite`
+  - **腾讯（4013）14 个**：`腾讯/hy4-preview` `hy3` `deepseek-v4.1-flash` `step-5-preview` `glm-5.3` `glm-5.3-flash` `glm-5.2` `space-bunny` `minimax-m3.1-flash` `minimax-m3` `kimi-k3.1-pro` `kimi-k3-1` `deepseek-v4-pro` `mimo-v2.6-pro`
+- **垃圾清理**：`cache/provider-model-catalog.json` 腾讯组曾积 **114 个旧模型**（`cn:*`/`wb:*`，4013 早期返回的垃圾）→ 清理为 腾讯 14 + 商汤 6（备份 `.bak-*`）
+- 改完需**重启桌面版**才在 UI 生效
+
 ### 遗留
 - 4 台 PVE（931/935/936/961）Hermes 仍 0.7.39，未部署 0.8.19（需授权）
 - 旧 `release/win-unpacked`（app.asar 被锁）与 `release/out-0819/win-unpacked-old-*` 待清理；`electron-builder.yml` output 暂为 `release/out-0819`
