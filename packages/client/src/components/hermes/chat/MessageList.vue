@@ -1271,7 +1271,7 @@ defineExpose({
               class="queue-float-item"
             >
               <span class="queue-index">{{ index + 1 }}</span>
-              <span class="queue-text">{{ queuedPreview(message.content) }}</span>
+              <span class="queue-text">{{ queuedPreview(message) }}</span>
               <!-- [user-controlled patch] 上游 #2477 的"安全排队插入"按钮图标与
                                  本 fork 的"立即发送"(promote) 撞车(都是上箭头):隐藏上游按钮,
                                  只保留本 fork 的 ↑ 立即发送(ESC/Ctrl+Enter 同语义)。删除时直接
