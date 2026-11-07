@@ -7,11 +7,11 @@
 
 本仓库是 `EKKOLearnAI/ekko-studio` 的 fork（原名 `hermes-studio`，上游已改名，旧地址 404），**2026-09-16 全新重建**：以官方 v0.7.21 为基线，只合入自研功能，版本号跟随官方（不做 fork 标记，避免启动提示）。
 
-## 当前状态（2026-10-16 校准）
+## 当前状态（2026-11-07 校准）
 
 | 分支 | 版本 | 说明 |
 |------|------|------|
-| `sync` | **0.7.39**（2026-10-28 校准） | 唯一有效分支。= 上游 `main` 最新 + 8 项自研功能（③路径显示已移除；⑨环境探测误判修复 2026-10-28 新增），已通过 `npm run build` + 桌面 `tsc --noEmit` 验证 |
+| `sync` | **0.8.19**（2026-11-07 校准） | 唯一有效分支。= 上游 `main` 最新（`8c894a69`）+ 自研功能（③路径显示已移除；⑨环境探测误判修复），已通过 `npm run build` 验证 |
 | `main` | 0.7.21 | 停用的旧基线，**勿用** |
 
 **流程固化（2026-10-15）**：新增 [`SYNC-CHECKLIST.md`](SYNC-CHECKLIST.md)（10 步执行清单，把「推自己的 GitHub」「更新文档记账」两步显式列为不可跳过）+
@@ -22,6 +22,17 @@
 排查中发现该补丁还是**坏的**：它把顶栏 `header-actions` 拆成两个兄弟 div，并重复渲染了一次会话标题；且 `workspace-badge` 的 `v-if` 未排除新建对话页，导致在新建对话页点顶栏路径 chip 改的是**上一个会话**而不是即将新建的对话（用户实测踩到）。
 处置：`ChatPanel.vue` 模板 + 样式全部还原，现 `git diff upstream/main -- packages/client/src/components/hermes/chat/ChatPanel.vue` **为空**（逐字节一致）。自研从 **8 项 → 7 项**，`self-check-custom.mjs` 命点 **14 → 13**（13/13 PASS）。同步更新：`SYNC-CHECKLIST.md`（冲突铁律去掉 `workspace-badge`、自检判据去掉「路径显示」）、`scripts/self-check-custom.mjs`、`docs/upstream-sync-and-fleet-deploy.md`、skill。**编号 ③ 保留不复用。**
 提交 `c9189537` 已推 `origin/sync`；`npm run build` exit=0。**当天二次打包交付**：`Ekko.Studio-0.7.36-x64.exe`（189MB，15:21→15:30）覆盖到 `d:\desk` 并重装本机；安装产物 `resources/webui/dist` 已搜不到 `workspace-badge`（证明确实生效）；启动 19 进程 + 主窗口 PID 4756，`/health`：`status=ok` / `webui_version=0.7.36` / `bridge=ready, running=true`。
+
+**最近一次合并（2026-11-07）**：上游 0.7.39 → **0.8.19**（`8c894a69`，落后 185 提交，大版本）。冲突 3 处内容 + 3 个测试文件 modify/delete：
+- `packages/client/src/stores/hermes/chat.ts` —— HEAD 的滚动信号/乐观快照 vs 上游新增 `pendingUserMessageIds`，**两者都保留**
+- `packages/ekko-agent/src/model/providers/openai-compatible.ts` —— 仅注释差异（自研⑥说明），保留注释
+- `packages/server/src/modules/studio/sockets/chat-run.ts` —— 最复杂：上游重构出 `executeRun` + `acquireRunAdmission()` 并发闸门，HEAD 有自研①preempt 队列。**合并策略：保留上游 admission 结构，把 preempt 逻辑嵌入其中**，`releaseAdmission` 幂等可多次调用故安全
+- 3 个测试文件（`model-request` / `group-chat-agent-workspace` / `task-plan-runs`）上游删除、本地保留：**实测 166 个用例全部通过，且上游对这些符号零覆盖**，故保留（代价是下次同步仍会有 modify/delete 冲突，选"保留本地"即可）
+- 合并后修复 1 处类型错误：上游把 `queuedPreview()` 参数由 `string` 改为 `Message`，而本地调用仍在传 `message.content` → 改为传整个 `message`
+
+**打包定制（本 fork 专属）**：`packages/desktop/electron-builder.yml` 的 `win.target.arch` 改为 **`[x64]`**（上游是 `[x64, arm64]`）。原因：arm64 缺原生依赖，打包必失败；本 fork 只交付 Windows x64。
+
+**部署事故与纠正（2026-11-07）**：961 升级后对话全挂（`Agent bridge socket closed without a response`）。**根因不是合并、不是上游 bug，而是部署脚本硬编码旧服务名**（`hermes-studio`/`hermes-web-ui`/`hermes-gateway`），`systemctl restart` 把遗留休眠 unit 唤醒 → 与 `ekko-studio` 抢 8648 → `EADDRINUSE` → `free(): invalid pointer` 崩溃重启循环（NRestarts 36）。处置：4 台遗留 unit 全移到 `/root/systemd-legacy-backup/`；`deploy-pve.sh`/`deploy-one-vm.sh` 服务名固定 `ekko-studio`，并在重启后强校验「8648 监听数=1 且进程数=1」。**唯一服务名 = `ekko-studio`。**
 
 **最近一次合并（2026-10-28 13:40 UTC）**：上游仓库已改名 —— `EKKOLearnAI/hermes-studio` **404**，fork 的 parent 现为 **`EKKOLearnAI/ekko-studio`**（同一项目的新名字/新迭代，旧地址不再存在）。本轮合并该仓库 `main` 的 **8 个提交**（#3554 Person 设置重构与上下文/任务加固、#3560 悬浮 zhezhe 后台任务、#3562 JEV 共享+个人助手记忆、#3563 个人助手通知、#3551 stackchan 语音文档、#3565 zhezhe 自我介绍修复、#3564 使用量与 agent logo、#3566 Person 任务续跑+任务工具），209 个文件。**merge-tree 预演 0 冲突，实 merge 也 0 冲突**（仅 `.gitignore`/`package.json` 非重叠自动合并）。版本仍 **0.7.39**；**依赖清单无变化**（`git diff backup..HEAD -- package*.json` 为空）→ 按流程**跳过 `npm install`**。本地 `npm run build` **exit=0**（dist 13:39:46），自研自检 **14/14 PASS**（本轮新增 ⑨）。合并后 HEAD `85e3e77c`，已推 `origin/sync`。
 > **本轮新增自研⑨**：coding-agent 环境探测误判修复（见下方第 8 节）。这是本轮唯一新增的 fork 补丁，因为**上游此 bug 仍在**：任意 `ENOENT` 都会被翻译成 "Node/npm environment was not detected"。

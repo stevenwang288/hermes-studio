@@ -1,6 +1,6 @@
 # Hermes Studio 上游同步与多端部署手册
 
-> 对象仓库：`stevenwang288/hermes-studio`（上游 `EKKOLearnAI/hermes-studio` 的 fork）
+> 对象仓库：`stevenwang288/hermes-studio`（上游 `EKKOLearnAI/ekko-studio` 的 fork）
 > 覆盖终端：4 台 PVE 虚拟机 + 1 台 Windows 桌面版
 > 最后校准：2026-10-02（0.7.27：sync 现为 4 项自研；936 构建须用 `/home/ubuntu/.nvm` 绝对路径）
 
@@ -9,7 +9,7 @@
 ## 0. 全景
 
 ```
-EKKOLearnAI/hermes-studio (上游 main)
+EKKOLearnAI/ekko-studio (上游 main)
         │  git fetch upstream && git merge
         ▼
 stevenwang288/hermes-studio (fork，工作分支 sync)
@@ -28,7 +28,7 @@ stevenwang288/hermes-studio (fork，工作分支 sync)
 | 项目 | 值 |
 |------|-----|
 | 本机仓库 | `D:\OneDrive\steven\code\ai\13IDE\hermes-studio` |
-| 上游 | `https://github.com/EKKOLearnAI/hermes-studio.git` |
+| 上游 | `https://github.com/EKKOLearnAI/ekko-studio.git` |
 | fork | `https://github.com/stevenwang288/hermes-studio.git` |
 | 桌面路径 | `d:\desk` |
 | 桌面产物 | `packages/desktop/release/Hermes.Studio-<version>-x64.exe` |
@@ -50,10 +50,15 @@ credential.helper       = manager          # 2026-09-22 修正，原为系统级
 
 | VMID | IP | 部署目录 | systemd 服务 |
 |------|-----|----------|--------------|
-| `931` | 192.168.9.31 | `/opt/hermes-studio-ekko` | `hermes-web-ui.service` + `hermes-gateway.service` |
-| `935` | 192.168.9.35 | `/opt/hermes-studio` | `hermes-studio.service` + `hermes-gateway.service` |
-| `936` | 192.168.9.36 | `/opt/hermes-studio-fork` | `hermes-web-ui.service`（**User=ubuntu**） |
-| `961` | 192.168.9.61 | `/opt/hermes-studio` | `hermes-studio.service` + `hermes-gateway.service` |
+| `931` | 192.168.9.31 | `/opt/hermes-studio-ekko` | `ekko-studio.service` |
+| `935` | 192.168.9.35 | `/opt/hermes-studio` | `ekko-studio.service`（另有 `studio-web.service` 属其他应用，勿动） |
+| `936` | 192.168.9.36 | `/opt/hermes-studio-fork` | `ekko-studio.service`（**User=ubuntu**） |
+| `961` | 192.168.9.61 | `/opt/hermes-studio` | `ekko-studio.service` |
+
+> **⚠️ 2026-11-07 更正**：此处原先写的是 `hermes-web-ui` / `hermes-studio` / `hermes-gateway`，**
+> 全部已废弃**。那些 unit 文件已移到各机 `/root/systemd-legacy-backup/`。
+> 唯一正确服务名是 **`ekko-studio`**；重启旧名会与 `ekko-studio` 抢 8648 端口，导致崩溃重启循环
+> （现象：对话报 `Agent bridge socket closed without a response`）。
 
 SSH 别名：`ssh pve-vm-931` / `-935` / `-936` / `-961`（root，密钥 `~/.ssh/id_ed25519`）
 
@@ -168,7 +173,7 @@ cp -r /opt/hermes-studio /opt/hermes-studio.bak.$(date +%Y%m%d%H%M%S)   # 先备
 git pull origin sync
 npm install --include=dev --no-audit --no-fund
 npm run build
-systemctl restart hermes-studio
+systemctl restart ekko-studio
 sleep 3
 systemctl is-active hermes-studio
 EOF
@@ -178,10 +183,10 @@ EOF
 
 | VMID | 目录 | 重启命令 | 额外处理 |
 |------|------|----------|----------|
-| 931 | `/opt/hermes-studio-ekko` | `systemctl restart hermes-web-ui hermes-gateway` | — |
-| 935 | `/opt/hermes-studio` | `systemctl restart hermes-studio hermes-gateway` | — |
-| 936 | `/opt/hermes-studio-fork` | `systemctl restart hermes-web-ui` | `chown -R ubuntu:ubuntu` 构建产物；先清磁盘 |
-| 961 | `/opt/hermes-studio` | `systemctl restart hermes-studio hermes-gateway` | — |
+| 931 | `/opt/hermes-studio-ekko` | `systemctl restart ekko-studio` | — |
+| 935 | `/opt/hermes-studio` | `systemctl restart ekko-studio` | — |
+| 936 | `/opt/hermes-studio-fork` | `systemctl restart ekko-studio` | `chown -R ubuntu:ubuntu` 构建产物；先清磁盘 |
+| 961 | `/opt/hermes-studio` | `systemctl restart ekko-studio` | — |
 
 **验证：**
 

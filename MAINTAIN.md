@@ -17,7 +17,7 @@
 
 ## 0. 这个仓库是什么
 
-`stevenwang288/hermes-studio` = 上游 `EKKOLearnAI/hermes-studio` 的 fork。
+`stevenwang288/hermes-studio` = 上游 `EKKOLearnAI/ekko-studio` 的 fork。
 
 - 以官方基线为底，**只保留 7 项自研功能**，其余一律跟随上游（品牌/图标/安装路径都是官方的，不做 fork 标记）
 - **唯一有效分支：`sync`**。`main` 是废弃的旧基线，不要用
@@ -181,10 +181,16 @@ node scripts/delivery-verify.mjs
 
 | VMID | IP | 部署目录 | 重启命令 | 注意 |
 |------|-----|----------|----------|------|
-| `931` | 192.168.9.31 | `/opt/hermes-studio-ekko` | `systemctl restart hermes-web-ui hermes-gateway` | — |
-| `935` | 192.168.9.35 | `/opt/hermes-studio` | `systemctl restart hermes-studio hermes-gateway` | — |
-| `936` | 192.168.9.36 | `/opt/hermes-studio-fork` | `systemctl restart hermes-web-ui` | 服务跑在 `ubuntu` 用户下；磁盘紧张（约剩 6.4G）；nvm 在 `/home/ubuntu/.nvm`（root 的 `$HOME` 没有）→ 构建必须 `export PATH=/home/ubuntu/.nvm/versions/node/v24.20.0/bin` + `chown -R ubuntu:ubuntu dist packages`；**git 全局代理 2026-10-02 已补**（http/https.proxy=127.0.0.1:7890，此前缺失导致 pull 直连 GitHub 被墙间歇失败，现已稳定） |
-| `961` | 192.168.9.61 | `/opt/hermes-studio` | `systemctl restart hermes-studio hermes-gateway` | — |
+| `931` | 192.168.9.31 | `/opt/hermes-studio-ekko` | `systemctl restart ekko-studio` | — |
+| `935` | 192.168.9.35 | `/opt/hermes-studio` | `systemctl restart ekko-studio` | `studio-web.service` 是另一个应用（`/opt/studio-web`），不要动 |
+| `936` | 192.168.9.36 | `/opt/hermes-studio-fork` | `systemctl restart ekko-studio` | 服务跑在 `ubuntu` 用户下；磁盘紧张（约剩 6.4G）；nvm 在 `/home/ubuntu/.nvm`（root 的 `$HOME` 没有）→ 构建必须 `export PATH=/home/ubuntu/.nvm/versions/node/v24.20.0/bin` + `chown -R ubuntu:ubuntu dist packages`；**git 全局代理 2026-10-02 已补**（http/https.proxy=127.0.0.1:7890，此前缺失导致 pull 直连 GitHub 被墙间歇失败，现已稳定） |
+| `961` | 192.168.9.61 | `/opt/hermes-studio` | `systemctl restart ekko-studio` | — |
+
+> **⚠️ 唯一服务名 = `ekko-studio`（2026-11-07 事故后确立）**
+> 旧名 `hermes-studio` / `hermes-web-ui` / `hermes-gateway` 的 unit 文件已从 4 台全部移到 `/root/systemd-legacy-backup/`。
+> **绝对不要 `systemctl restart` 旧名**——遗留 unit 一旦被唤起会和 `ekko-studio` 抢 8648 端口，导致
+> `EADDRINUSE` → `free(): invalid pointer` 崩溃重启循环，表现为对话报 `Agent bridge socket closed without a response`。
+> 部署后必检：`ss -lnt | grep -c ':8648'` 必须 = 1，`ps -eo cmd | grep -c '[d]ist/server/index.js'` 必须 = 1。
 
 SSH：`ssh pve-vm-931` / `-935` / `-936` / `-961`（root，密钥 `~/.ssh/id_ed25519`）
 
@@ -201,7 +207,7 @@ cp -r /opt/hermes-studio /opt/hermes-studio.bak.$(date +%Y%m%d%H%M%S)
 git pull origin sync
 npm install --include=dev --no-audit --no-fund
 npm run build
-systemctl restart hermes-studio
+systemctl restart ekko-studio
 sleep 3 && systemctl is-active hermes-studio
 EOF
 ```
