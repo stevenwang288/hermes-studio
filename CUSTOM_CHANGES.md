@@ -1,9 +1,8 @@
 # 本仓库说明
 
-> **动手时照 [`SYNC-CHECKLIST.md`](SYNC-CHECKLIST.md) 走**（10 步打勾，最后跑 `node scripts/delivery-verify.mjs` 终检）。
-> **维护规则与坑的原理看 [`MAINTAIN.md`](MAINTAIN.md)** —— 上游更新时该做什么、4 台 PVE 怎么升级、Windows 安装程序放哪，全在里面。
-> **详细手册看 [`docs/upstream-sync-and-fleet-deploy.md`](docs/upstream-sync-and-fleet-deploy.md)**。
-> 本文件负责：自研功能清单 + **每轮记账**。
+> **唯一维护入口：[`MAINTAIN.md`](MAINTAIN.md)** —— 流程、命令、坑、4 台 PVE 部署、Windows 打包，全在里面。
+> 本文件只负责：**自研功能清单（只 2 项）+ 已撤销功能记录（为什么撤）**。
+> 发版日志在 [`UPDATE_LOG.md`](UPDATE_LOG.md)（每次更新版本必须追加）。
 
 本仓库是 `EKKOLearnAI/ekko-studio` 的 fork（原名 `hermes-studio`，上游已改名，旧地址 404），**2026-09-16 全新重建**：以官方 v0.7.21 为基线，只合入自研功能，版本号跟随官方（不做 fork 标记，避免启动提示）。
 
@@ -14,13 +13,14 @@
 | `sync` | **0.8.19**（2026-11-07 校准） | 唯一有效分支。= 上游 `main` 最新（`8c894a69`）+ **仅 2 项自研功能（① 消息队列、② Windows 桌面字体缩放）**，已通过 `npm run build` 验证 |
 | `main` | 0.7.21 | 停用的旧基线，**勿用** |
 
-**流程固化（2026-10-15）**：新增 [`SYNC-CHECKLIST.md`](SYNC-CHECKLIST.md)（10 步执行清单，把「推自己的 GitHub」「更新文档记账」两步显式列为不可跳过）+
+**流程固化（2026-10-15，2026-11-07 收敛）**：当时新增了独立的 10 步执行清单，把「推自己的 GitHub」「更新文档记账」两步显式列为不可跳过；
+**2026-11-07 起该清单已并入 [`MAINTAIN.md`](MAINTAIN.md) 第 2 节，不再单独维护文件**（避免同一套流程写三份）。配套：
 `scripts/delivery-verify.mjs`（9 项终检，一项 FAIL 就不算完成）+ `scripts/sync-fleet-head.sh`（只同步 4 台 git 指针，解决「部署后又记账 → PVE HEAD 漂移」）。
 首跑终检即抓出真问题：4 台停在 `c41c75c1` 而仓库已是 `cbd5d44e`（记账提交所致，运行时未变）。
 
 **自研变更（2026-10-16）· 移除自研③「路径完整显示」**：大哥拍板 —— 上游已有该能力（`activeWorkspacePath`/`activeWorkspaceSessionId`，见 #3396「不再截断 workspace 路径」），fork 早期自己加的 `workspace-badge` 徽标属重复，**这块完全改为跟随上游**。
 排查中发现该补丁还是**坏的**：它把顶栏 `header-actions` 拆成两个兄弟 div，并重复渲染了一次会话标题；且 `workspace-badge` 的 `v-if` 未排除新建对话页，导致在新建对话页点顶栏路径 chip 改的是**上一个会话**而不是即将新建的对话（用户实测踩到）。
-处置：`ChatPanel.vue` 模板 + 样式全部还原，现 `git diff upstream/main -- packages/client/src/components/hermes/chat/ChatPanel.vue` **为空**（逐字节一致）。自研从 **8 项 → 7 项**，`self-check-custom.mjs` 命点 **14 → 13**（13/13 PASS）。同步更新：`SYNC-CHECKLIST.md`（冲突铁律去掉 `workspace-badge`、自检判据去掉「路径显示」）、`scripts/self-check-custom.mjs`、`docs/upstream-sync-and-fleet-deploy.md`、skill。**编号 ③ 保留不复用。**
+处置：`ChatPanel.vue` 模板 + 样式全部还原，现 `git diff upstream/main -- packages/client/src/components/hermes/chat/ChatPanel.vue` **为空**（逐字节一致）。自研从 **8 项 → 7 项**，`self-check-custom.mjs` 命点 **14 → 13**（13/13 PASS）。同步更新：`MAINTAIN.md`（冲突铁律去掉 `workspace-badge`、自检判据去掉「路径显示」）、`scripts/self-check-custom.mjs`、`MAINTAIN.md`、skill。**编号 ③ 保留不复用。**
 提交 `c9189537` 已推 `origin/sync`；`npm run build` exit=0。**当天二次打包交付**：`Ekko.Studio-0.7.36-x64.exe`（189MB，15:21→15:30）覆盖到 `d:\desk` 并重装本机；安装产物 `resources/webui/dist` 已搜不到 `workspace-badge`（证明确实生效）；启动 19 进程 + 主窗口 PID 4756，`/health`：`status=ok` / `webui_version=0.7.36` / `bridge=ready, running=true`。
 
 **最近一次合并（2026-11-07）**：上游 0.7.39 → **0.8.19**（`8c894a69`，落后 185 提交，大版本）。冲突 3 处内容 + 3 个测试文件 modify/delete：
@@ -97,7 +97,7 @@
 
 部署到 5 个终端：**4 台 PVE 虚拟机（931 / 935 / 936 / 961）+ 1 台 Windows 桌面版**。
 
-完整更新流程见 [`docs/upstream-sync-and-fleet-deploy.md`](docs/upstream-sync-and-fleet-deploy.md)。
+完整更新流程见 [`MAINTAIN.md`](MAINTAIN.md)。
 
 ---
 
@@ -211,7 +211,7 @@
 
 ## 合并上游 SOP（下次升级）
 
-**照 [`SYNC-CHECKLIST.md`](SYNC-CHECKLIST.md) 逐步打勾**，那里是唯一的执行入口（含每步判据与终检）。速查：
+**照 [`MAINTAIN.md`](MAINTAIN.md) 逐步打勾**，那里是唯一的执行入口（含每步判据与终检）。速查：
 
 ```bash
 git fetch upstream main --tags --force

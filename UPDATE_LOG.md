@@ -1,7 +1,51 @@
 # 更新日志（Update Log）
 
 > 本文件是本 fork 自己的更新日志，记录每次「同步上游 + 部署交付」的完整过程。
-> 每次更新在**顶部追加**一条新记录（最新在上）。执行流程见 `SYNC-CHECKLIST.md`，自研清单见 `CUSTOM_CHANGES.md`。
+> 每次更新在**顶部追加**一条新记录（最新在上）。执行流程见 `MAINTAIN.md`，自研清单见 `CUSTOM_CHANGES.md`。
+
+---
+
+## 2026-11-07 23:55 · 精简为「只 2 项自研」+ 重建并重装桌面版
+
+### 决策
+大哥拍板：**只保留 ① 消息队列、② Windows 桌面字体缩放**，其余自研全部撤销、回归上游原版。
+
+### 撤销（`git checkout 8c894a69 -- <file>`）
+④ `client/src/utils/desktop-browser.ts`、④ `desktop/src/main/browser/browser-manager.ts`、
+④ `desktop/src/main/index.ts` 中的 `findChromeExecutable`（② 缩放保留）、⑤ `hermes/controllers/weixin.ts`、
+⑥ `openai-compatible.ts`、⑦ `hermes_bridge.py`、⑧ `coding-agents/services/context-policy.ts`、
+⑨ `coding-agents/services/index.ts` + `update/version-preview-manager.ts`、
+10-28 批次带入的 `studio/services/task-plan-runs.ts`（任务卡结算）、`electron-builder.yml`（arch 回上游 `[x64, arm64]`）
+
+### 删除测试（4 个）
+`tests/ekko-agent/model-request.test.ts`、`tests/server/group-chat-agent-workspace.test.ts`、
+`tests/server/task-plan-runs.test.ts`（均上游已删）；
+`tests/server/chat-run-promote.test.ts`（**死测试**：import 0.7 路径 `services/hermes/run-chat`，0.8 依赖注入后构造即抛
+`Studio chat Agent runtime has not been configured`，重映射 11 个 mock 路径仍失败）
+
+### 代码结果
+- 与上游源码差异收敛到 **8 个文件**（7 个属① + `desktop/src/main/index.ts` 属②）
+- `npm run build` exit=0（dist 13.0mb）；`self-check-custom.mjs` 改为只校验 ①② 且**查工作区**，7/7 PASS
+- 提交 `24558dce5`
+
+### 打包（重要坑）
+- 上游 `electron-builder.yml` 的 `win.target.arch` = `[x64, arm64]`，**显式 arch 列表优先级高于命令行 `--x64`** →
+  本机没有 arm64 原生依赖（`sharp-win32-arm64`、`sherpa-onnx-win-arm64`），arm64 分支必报
+  `Packaged Web UI is incomplete`
+- **解法**：打包前临时把该行改成 `arch: [x64]`，打完 `cp` 还原（仓库保持与上游一致），并用
+  `-c.directories.output=release/build-final` 指定新输出目录避开历史上被锁的 `win-unpacked`
+- 产物：`packages/desktop/release/build-final/Ekko.Studio-0.8.19-x64.exe`（365MB）
+
+### 安装验证
+- nsis `/S` 静默安装，`ProductVersion = 0.8.19.0`，216.4MB，退出码 0
+- 安装包内实测：`queued_messages`×6、`preempt`×1、`desktop-zoom.json`×1（①② 在）；
+  `findChromeExecutable`=0、`_ALWAYS_EAGER_MCP_TOOLSETS`=0（④⑦ 已消失）
+
+### 文档收敛
+- 删除重复/过期文档：`SYNC-CHECKLIST.md`、`docs/upstream-sync-and-fleet-deploy.md`（与 `MAINTAIN.md` 重复）、
+  `docs/browser-replacement-plan.md`（写的是已撤销的④）
+- `MAINTAIN.md` 升为**唯一入口**，开头加「30 秒看懂」+「文档分工」+ **两条硬规则**（每次发版必记本文件、交付前必跑终检）
+- 全部断链引用改指 `MAINTAIN.md`
 
 ---
 

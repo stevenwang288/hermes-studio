@@ -7,7 +7,7 @@
  *
  * 自动校验 9 项交付指标，全部 PASS 才算「一条龙完成」。
  * --skip-pve：PVE 4 台的 commit/存活共 8 项标 SKIP 且不判 FAIL（大哥明确本轮不动 PVE 时用）。
- * 只要有一项 FAIL -> 回到 SYNC-CHECKLIST.md 补完那一步再重跑。
+ * 只要有一项 FAIL -> 回到 MAINTAIN.md 补完那一步再重跑。
  * 退出码：0 = 全绿，1 = 有 FAIL。
  */
 
@@ -243,6 +243,6 @@ if (failed.length === 0) {
     `未通过 ${failed.length}/${results.length} —— 回去补完下面这几步再重跑：`
   );
   for (const r of failed) console.log(`   - ${r.name}: ${r.detail}`);
-  console.log('\n对照 SYNC-CHECKLIST.md 补齐后重跑：node scripts/delivery-verify.mjs');
+  console.log('\n对照 MAINTAIN.md 补齐后重跑：node scripts/delivery-verify.mjs');
   process.exit(1);
 }

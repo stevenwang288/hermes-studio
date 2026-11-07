@@ -1,17 +1,34 @@
-# MAINTAIN.md — 这个 fork 该怎么维护
+# MAINTAIN.md — 这个 fork 的唯一维护入口
 
-> **给未来的 AI 助手 / 给未来的我：执行时先看 [`SYNC-CHECKLIST.md`](SYNC-CHECKLIST.md)，一份打勾清单走完。**
-> 本文件是背景原理与坑的说明。二者分工：
->
-> | 文档 | 用途 |
-> |---|---|
-> | **[`SYNC-CHECKLIST.md`](SYNC-CHECKLIST.md)** | **执行清单**（10 步，逐步打勾，含命令与判据）—— 动手时看这个 |
-> | `MAINTAIN.md`（本文件） | 背景、原理、坑的解释、环境与配置 |
-> | `CUSTOM_CHANGES.md` | 自研功能清单 + 每轮记账 |
-> | [`docs/upstream-sync-and-fleet-deploy.md`](docs/upstream-sync-and-fleet-deploy.md) | 详细手册 |
->
-> **第 10 步是硬闸门**：`node scripts/delivery-verify.mjs` 自动校验 9 项交付指标，
-> **有 1 项 FAIL 就不算完成**。别凭记忆说「都好了」。
+> **给未来的 AI 助手：只要读到这个仓库（本地路径或 GitHub `stevenwang288/hermes-studio`），读这一份文件就能跑完整套流程。**
+> 不需要问人，不需要再看别的文档。下面「30 秒看懂」看完就能动手。
+
+## 30 秒看懂
+
+| 项 | 值 |
+|---|---|
+| 这是什么 | 上游 `EKKOLearnAI/ekko-studio` 的 fork（上游原名 `hermes-studio`，已改名，旧地址 404） |
+| 唯一有效分支 | **`sync`**（`main` 是 0.7.21 废弃基线，勿用） |
+| 自研改动 | **只有 2 项**：① 消息队列、② Windows 桌面字体缩放。其余一律跟随上游 |
+| 改动落在哪 | 与上游的源码差异**必须只有 8 个文件**（见第 3 节）。超出 = 夹带了东西 |
+| 部署目标 | 4 台 PVE（931/935/936/961）+ 1 台本机 Windows 桌面版 |
+| 服务名 | **只有 `ekko-studio`**。旧名 `hermes-studio`/`hermes-web-ui`/`hermes-gateway` 已废弃，unit 已移到 `/root/systemd-legacy-backup/` |
+| 一条龙 | 上游更新 → 合并 → 本地验证 → 推 GitHub → 4 台 PVE 部署 → 浏览器验收 → 打包桌面版并安装 → **记 UPDATE_LOG** → 跑终检 |
+
+## 文档分工（就这 4 份，别再加了）
+
+| 文档 | 用途 |
+|---|---|
+| **`MAINTAIN.md`（本文件）** | **唯一入口**：流程、命令、坑、环境、部署 —— 全部在这 |
+| `CUSTOM_CHANGES.md` | 自研功能清单（只 2 项）+ 已撤销功能记录（为什么撤） |
+| `UPDATE_LOG.md` | **发版日志，每次更新版本必须追加一条**（见下方硬规则） |
+| `AGENTS.md` / `README.md` | 上游文件，**不要改**（改了每次合并都冲突） |
+
+## 两条硬规则（不许跳过）
+
+1. **每次更新版本，必须往 `UPDATE_LOG.md` 追加一条**，格式见该文件顶部模板，至少写：版本号、上游 commit、合并了哪些提交、撤销/新增了什么、4 台各自部署结果、桌面版 exe 路径与安装验证、遗留问题。
+2. **交付前必须跑终检**：`node scripts/delivery-verify.mjs`（9 项指标）和 `node scripts/self-check-custom.mjs`（①②共 7 个命点）。
+   **有 1 项 FAIL 就不算完成**，别凭记忆说「都好了」。
 
 ---
 
@@ -29,7 +46,7 @@
 
 > **上游更新了 → 合进来 → 本地验证 → 推 GitHub → 更新 4 台 PVE → 浏览器验收 4 台 → 出 Windows 安装程序并装到本机 → 更新文档记账 → 跑终检全绿**
 
-用户不需要每次交代，看到上游有新版本就按 [`SYNC-CHECKLIST.md`](SYNC-CHECKLIST.md) 执行。
+用户不需要每次交代，看到上游有新版本就按本文件**第 2 节**执行。
 **这条链是「一条龙」，缺任何一环都不算完成。**
 
 ### 三步最容易漏（历史上真漏过，重点盯）
@@ -421,7 +438,7 @@ tasklist | grep -i "Ekko Studio"
 > **装完启动若报「启动本地服务失败 / Web UI shell did not become ready within 120000ms」**：
 > 这不是代码崩，是桌面壳对 `127.0.0.1:<port>/health/ready` 的 120s 就绪探测超时
 > （服务端日志其实全绿）。处置：点 Retry / 彻底退出重启；仍不行则设环境变量
-> `HERMES_DESKTOP_READY_TIMEOUT_MS=240000`。详见 `docs/upstream-sync-and-fleet-deploy.md`。
+> `HERMES_DESKTOP_READY_TIMEOUT_MS=240000`。详见 `MAINTAIN.md`。
 
 ---
 
