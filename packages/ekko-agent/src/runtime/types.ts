@@ -97,6 +97,8 @@ export interface AgentRuntimeRunInput {
   messages: AgentMessageInput[]
   signal?: AbortSignal
   systemPrompt?: string
+  /** Default true. Scoped hosts without execution tools may omit generic shell/code guidance. Does not grant or remove tools. */
+  toolExecutionGuidelinesEnabled?: boolean
   skills?: AgentSkill[]
   maxSteps?: number
   maxModelRetries?: number
@@ -144,6 +146,11 @@ export interface AgentRuntimeRunInput {
   onSkillReviewUsage?: (input: SkillReviewUsageEvent) => void
   /** Synchronous durable commit, called before plan.updated is published. Throw to reject an update. */
   onPlanUpdate?: (plan: import('../tools/plan').AgentTaskPlan) => void
+  /**
+   * Trusted host decision after the entire tool batch has settled. A finalReply
+   * requests one tool-free model reply, even at maxSteps, instead of cutting off text.
+   */
+  onToolBatchComplete?: () => AgentOutputMessage | { finalReply: string; finishReason?: string } | undefined
   onEvent?: (event: AgentRuntimeEvent) => void
 }
 

@@ -13,8 +13,8 @@ Ekko Agent, Hermes Agent, and coding agents for chat, coding, and workflows.
 | Ekko Agent | `packages/ekko-agent` | Canonical Ekko runtime, profile facade, providers, tools, memory, skills, conversations, and package API. |
 | Desktop | `packages/desktop` | Electron shell, local Web UI server bootstrap, updater, bundled Python/Hermes runtime. |
 | MCU | `packages/mcu` | ESP32-C3 source projects and release firmware; board-specific ESP32-S3 firmware. |
-| Tests | `tests` | Vitest unit/integration tests and Playwright browser tests. |
-| CI | `.github/workflows` | Build, e2e, lockfile, Docker, and desktop release automation. |
+| Tests | `tests` | Required focused tests for new features; the legacy suite has been removed. |
+| CI | `.github/workflows` | Independent Build, Test and E2E checks, lockfile, Docker, and desktop release automation. |
 
 ## Request Flow
 
@@ -78,7 +78,7 @@ Frontend rules:
 
 Desktop packaging is intentionally split:
 
-- Pull requests run the web UI build and tests in `.github/workflows/build.yml`.
+- Pull requests run the repository harness and web UI build in `.github/workflows/build.yml`.
 - Published GitHub Releases run Web UI artifact packaging and Docker image publishing without
   marking the release as GitHub latest.
 - Manual dispatches run full desktop artifact packaging in `.github/workflows/desktop-release.yml`.
@@ -126,6 +126,8 @@ python/                 Hermes Agent Git checkout and source root
   agent-browser/
   node/                  browser CLI npm prefix
   ms-playwright/
+  manifest.json         Hermes PM payload paths on newer runtimes
+  runtime-tools/        PM-pinned Chromium on newer runtimes
 node/                    bundled Node.js
 git/                     bundled MinGit on Windows
 runtime-manifest.json
@@ -144,13 +146,36 @@ patch tracked Hermes source during this build:
 Studio-specific integration belongs in Studio, and the clean checkout is what
 allows users to run the upstream `hermes update` command directly.
 
+Hermes 0.23 runtime builds use Python 3.14.7 and Node.js 26.13.0 by default.
+Fetch steps reject cached interpreters from another pinned version before reuse.
+When the source exposes the native `tools.browser_launcher`, the build stages Chromium
+through PM's build-owned `prepare_tools` operation and writes a relative payload
+manifest. PM can then find the bundled executable after extraction without a
+profile-specific path or a first-use download. Older runtimes retain the
+agent-browser packaging path. Generated PM files are excluded through Git's
+local `info/exclude`; tracked upstream files remain unchanged. Packaging checks
+the PM-selected browser again after moving the source into its staging directory.
+
+Copilot activation prepares the `github-copilot` provider plugin when the selected
+Hermes release requires it, then stores the accepted OAuth credential in that
+profile's `.env`. Existing enabled profiles migrate on worker startup; read-only
+token detection does not install plugins. Model catalogs use runtime-readable
+credentials, while explicit Add can discover and accept a gh/VS Code login.
+Startup respects disabled lazy installation and never re-enables a disabled plugin.
+
 ## Validation Surface
 
 The minimum mechanical harness is:
 
 - `npm run harness:check` for repository docs, workflow, and package-script invariants.
-- `npm run test` or focused Vitest tests for local logic.
-- `npm run test:e2e` for browser-visible routing/auth/chat regressions.
+- Focused `npm run test -- <file>` for each new feature's logic.
+- Focused `npm run test:e2e -- <file>` for new browser journeys.
+- Independent Test (`test.yml`) and E2E (`playwright.yml`) workflows run all
+  current Vitest and Playwright tests. Build (`build.yml`) runs the harness and
+  production build. Each workflow reports its own status and can fail independently.
+- Empty suites are allowed during the reset, without waiving the requirement to
+  test new features.
+- CI does not require blanket coverage or browser shards.
 - `npm run build` for type checking and production bundles.
 
 See `docs/harness/validation.md` for change-specific commands.

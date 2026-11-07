@@ -28,6 +28,7 @@ import { useSessionSearch } from "@/composables/useSessionSearch";
 import { watchServerTtsSettingsHydration } from "@/composables/useTtsSettingsHydration";
 import { useAppStore } from "@/stores/hermes/app";
 import { useProfilesStore } from "@/stores/hermes/profiles";
+import { usePersonPresenceStore } from '@/stores/hermes/person-presence';
 import { isStoredSuperAdmin } from "@/api/client";
 import AuthEventListener from "@/components/auth/AuthEventListener.vue";
 import { desktopBridge } from "@/utils/desktop-bridge";
@@ -126,6 +127,10 @@ const isStandaloneChatPage = computed(
   () => route.meta?.standaloneChat === true,
 );
 const isInviteOnlyPage = computed(() => route.meta?.inviteOnly === true);
+const personPresence = usePersonPresenceStore();
+watch(() => !isLoginPage.value && !isInviteOnlyPage.value && route.name !== 'desktop.pet', enabled => {
+  if (enabled) personPresence.start(); else personPresence.stop();
+}, { immediate: true });
 const wideViewportQuery = window.matchMedia('(min-width: 769px)');
 const isWideViewport = ref(wideViewportQuery.matches);
 const viewportWidth = ref(window.innerWidth);
@@ -147,7 +152,7 @@ provide(mobileNavigationKey, {
   target: computed(() => !isWideViewport.value && hasNavigationRail.value ? mobileSidebarHost.value : null),
 });
 const hasMobileContextSidebar = computed(() =>
-  !['hermes.person', 'hermes.connections', 'hermes.agentManager', 'hermes.models', 'hermes.usage', 'hermes.apiRelay'].includes(String(route.name)),
+  !['hermes.connections', 'hermes.agentManager', 'hermes.models', 'hermes.usage', 'hermes.apiRelay'].includes(String(route.name)),
 );
 watch([hasNavigationRail, isWideViewport], () => { mobileNavigationOpen.value = false; });
 watch(sessionSearchOpen, (open) => { if (open) mobileNavigationOpen.value = false; });
@@ -296,6 +301,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  personPresence.stop();
   window.removeEventListener('resize', handleViewportResize);
   wideViewportQuery.removeEventListener('change', handleWideViewportChange);
   stopWindowStateListener?.();
@@ -378,6 +384,7 @@ useKeyboard();
               <div
                 class="app-layout"
                 :class="{
+                  'app-layout--shell-sidebar': usesShellSidebar,
                   'no-sidebar': isLoginPage || !showAppSidebar,
                   'has-hermes-config-sidebar': usesHermesConfigSidebar,
                   'has-ekko-config-sidebar': usesEkkoConfigSidebar,
@@ -631,6 +638,7 @@ useKeyboard();
     :deep(.header-title),
     :deep(h1),
     :deep(.header-session-title),
+    :deep(.person-title),
     :deep(.header-workflow-title),
     :deep(.room-title-text) {
       font-size: calc(var(--font-size-base, 14px) * 13 / 14);
@@ -710,6 +718,31 @@ useKeyboard();
     border-radius: 0;
     box-shadow: none;
   }
+
+  // The shell sidebar and page form one surface with a straight inner seam.
+  .app-layout--shell-sidebar {
+    --studio-layout-start-radius: var(--theme-sidebar-radius, var(--studio-content-radius));
+    --studio-layout-end-radius: var(--theme-content-radius, var(--studio-content-radius));
+    --studio-layout-clip: inset(0 round var(--studio-layout-start-radius) var(--studio-layout-end-radius) var(--studio-layout-end-radius) var(--studio-layout-start-radius));
+    border-radius: 0;
+    clip-path: var(--studio-layout-clip);
+
+    &:dir(rtl) {
+      --studio-layout-clip: inset(0 round var(--studio-layout-end-radius) var(--studio-layout-start-radius) var(--studio-layout-start-radius) var(--studio-layout-end-radius));
+    }
+
+    > :deep(:is(.sidebar, .hermes-config-sidebar, .ekko-config-sidebar, .coding-agent-config-sidebar)) {
+      border-radius: 0;
+      border-start-start-radius: var(--studio-layout-start-radius);
+      border-end-start-radius: var(--studio-layout-start-radius);
+    }
+
+    > .app-main--card {
+      border-radius: 0;
+      border-start-end-radius: var(--studio-layout-end-radius);
+      border-end-end-radius: var(--studio-layout-end-radius);
+    }
+  }
 }
 
 .app-shell--custom-background {
@@ -726,7 +759,7 @@ useKeyboard();
       // Composite the image and surfaces before rounding them together. Separate
       // rounded clips leave antialiased pixels that expose the unfiltered image.
       border-radius: 0;
-      clip-path: inset(0 round var(--studio-content-radius));
+      clip-path: var(--studio-layout-clip, inset(0 round var(--studio-content-radius)));
     }
   }
 
@@ -766,6 +799,7 @@ useKeyboard();
   :deep(.ekko-config-sidebar),
   :deep(.coding-agent-config-sidebar),
   :deep(.chat-panel > .session-list),
+  :deep(.person-layout > .person-sidebar),
   :deep(.history-panel > .page-loading-content > .session-list),
   :deep(.group-chat-panel > .room-sidebar),
   :deep(.agent-avatar-rail),
@@ -871,6 +905,7 @@ useKeyboard();
   }
 
   :deep(.chat-panel > .session-list > .page-sidebar-top),
+  :deep(.person-layout > .person-sidebar > .page-sidebar-top),
   :deep(.history-panel > .page-loading-content > .session-list > .page-sidebar-top),
   :deep(.workflow-view > .page-loading-content > .workflow-sidebar > .page-sidebar-top),
   :deep(.group-chat-panel > .room-sidebar > .sidebar-header) {
@@ -919,6 +954,7 @@ useKeyboard();
   }
 
   :deep(.chat-panel > .session-list > .page-sidebar-top),
+  :deep(.person-layout > .person-sidebar > .page-sidebar-top),
   :deep(.history-panel > .page-loading-content > .session-list > .page-sidebar-top),
   :deep(.workflow-view > .page-loading-content > .workflow-sidebar > .page-sidebar-top),
   :deep(.group-chat-panel > .room-sidebar > .sidebar-header) {

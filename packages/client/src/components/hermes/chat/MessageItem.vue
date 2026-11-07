@@ -5,19 +5,19 @@ import {
   formatReferencedContentForDisplay,
   parseMessageReference,
   type Message,
-  type ContentBlock,
 } from "@/stores/hermes/chat";
 import { computed, onBeforeUnmount, onMounted, ref, watchEffect } from "vue";
 import { useI18n } from "vue-i18n";
 import { useMessage } from "naive-ui";
 import { downloadFile, getDownloadUrl } from "@/api/studio/download";
 import { copyToClipboard } from "@/utils/clipboard";
+import { parseContentBlocks } from "@/utils/content-blocks";
 import { parseThinking, countThinkingChars } from "@/utils/thinking-parser";
 import { useChatStore } from "@/stores/hermes/chat";
 import { useFilesStore } from "@/stores/hermes/files";
 import { useToolPanelStore } from "@/stores/hermes/tool-panel";
 import { useSettingsStore } from "@/stores/hermes/settings";
-import { chatSessionAgentAvatar, type ChatAgentAvatar } from "@/utils/chat-agent-avatar";
+import { chatSessionAgentAvatar, personAvatarAnimation, personAvatarStyle, type ChatAgentAvatar } from "@/utils/chat-agent-avatar";
 import TaskPlanCard from './TaskPlanCard.vue';
 import ToolChangeCard from "./ToolChangeCard.vue";
 import {
@@ -49,6 +49,8 @@ const JSON_TRUNCATED_KEY = "__truncated__";
 
 const props = withDefaults(defineProps<{
   message: Message
+  hideRunUsage?: boolean
+  hideReasoning?: boolean
   highlight?: boolean
   headingIdPrefix?: string
   showForkAction?: boolean
@@ -123,38 +125,6 @@ function imageNameFromDataUrl(url: string, index: number): string {
   const match = url.match(/^data:image\/([^;,]+)/i)
   const ext = match?.[1] === 'jpeg' ? 'jpg' : match?.[1] || 'png'
   return `image-${index + 1}.${ext}`
-}
-
-function parseContentBlocks(content: string): Array<ContentBlock | Record<string, unknown>> | null {
-  const trimmed = content.trim()
-  if (!trimmed) return null
-
-  const parse = (value: string) => {
-    const parsed = JSON.parse(value)
-    return Array.isArray(parsed) && parsed.length > 0 && 'type' in parsed[0]
-      ? parsed as Array<ContentBlock | Record<string, unknown>>
-      : null
-  }
-
-  try {
-    return parse(trimmed)
-  } catch {
-    // Hermes Agent stored some multimodal user messages via Python str(list),
-    // e.g. [{'type': 'text'}, {'type': 'image_url', ...}]. Convert that
-    // legacy repr into JSON for display only.
-    if (!trimmed.startsWith("[{'") && !trimmed.startsWith('[{"')) return null
-    try {
-      return parse(
-        trimmed
-          .replace(/\bNone\b/g, 'null')
-          .replace(/\bTrue\b/g, 'true')
-          .replace(/\bFalse\b/g, 'false')
-          .replace(/'/g, '"'),
-      )
-    } catch {
-      return null
-    }
-  }
 }
 
 // Parse ContentBlock[] from JSON string
@@ -1003,7 +973,7 @@ onBeforeUnmount(() => {
           class="tool-details-expand"
         >
           <div class="tool-details" @click="handleToolDetailClick">
-            <div v-if="message.reasoning?.trim()" class="tool-detail-section">
+            <div v-if="!hideReasoning && message.reasoning?.trim()" class="tool-detail-section">
               <div class="tool-detail-label">{{ t("chat.thinkingLabel") }}</div>
               <div class="tool-detail-reasoning">
                 <MarkdownRenderer :content="message.reasoning" />
@@ -1036,6 +1006,8 @@ onBeforeUnmount(() => {
           <div v-if="message.role === 'assistant'" class="message-author assistant-message-author">
             <img
               class="msg-avatar"
+              :class="{ 'msg-avatar--person': !!personAvatarAnimation(assistantAgent, 'idle') }"
+              :style="personAvatarStyle(assistantAgent)"
               :src="assistantAgent.src"
               :alt="assistantAgent.label"
               draggable="false"
@@ -1115,7 +1087,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div
-              v-if="hasThinking"
+              v-if="!hideReasoning && hasThinking"
               class="thinking-block"
               :class="{ expanded: thinkingExpanded }"
             >
@@ -1159,9 +1131,12 @@ onBeforeUnmount(() => {
 
             <!-- Render user message content -->
             <template v-if="message.role === 'user'">
-              <!-- ContentBlock[] format -->
+              <!-- ContentBlock[] format. Native attachments (with display URLs)
+                   win when both are present, e.g. queued messages promoted into
+                   the transcript keep attachments while content stays serialized
+                   blocks. -->
               <template v-if="isContentBlockArray">
-                <div v-if="contentFiles && contentFiles.length > 0" class="msg-attachments">
+                <div v-if="!hasAttachments && contentFiles && contentFiles.length > 0" class="msg-attachments">
                   <div
                     v-for="(file, idx) in contentFiles"
                     :key="idx"
@@ -1222,13 +1197,13 @@ onBeforeUnmount(() => {
 
             <!-- Render assistant message content -->
             <MarkdownRenderer
-              v-if="message.role === 'assistant' && message.content && !parsedThinking.body"
+              v-if="message.role === 'assistant' && message.content && !parsedThinking.body && !(hideReasoning && hasThinking)"
               :content="message.content"
               :heading-id-prefix="effectiveHeadingIdPrefix"
             />
 
             <PersonTaskReturnCard v-if="message.personTaskReturn && !message.isStreaming" :result="message.personTaskReturn" />
-            <RunUsageCard v-if="message.runUsage && !message.isStreaming" :usage="message.runUsage" />
+            <RunUsageCard v-if="!hideRunUsage && message.runUsage && !message.isStreaming" :usage="message.runUsage" />
 
             <ToolChangeCard
               v-for="change in workspaceChanges"
@@ -1340,6 +1315,7 @@ onBeforeUnmount(() => {
 
 <style scoped lang="scss">
 @use "@/styles/variables" as *;
+@use "@/styles/person-avatar" as *;
 
 .message {
   display: flex;
@@ -1386,6 +1362,7 @@ onBeforeUnmount(() => {
       border: var(--border-width, 1px) solid #fff;
       border-radius: 50%;
       object-fit: cover;
+      &--person { @include person-avatar(22px); }
     }
 
     .message-bubble {
