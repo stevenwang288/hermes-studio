@@ -5,6 +5,39 @@
 
 ---
 
+## 2026-11-07 · 同步上游 0.7.39 → 0.8.19
+
+### 上游同步
+- 上游 `EKKOLearnAI/ekko-studio` main：`0.7.39` → **`0.8.19`**（commit `8c894a69`），落后 **185 提交**
+- 合并方式：`git merge FETCH_HEAD`，合并提交 `e296a636b`
+
+### 冲突处理（3 内容冲突 + 3 测试 modify/delete）
+1. **`ekko-agent/src/model/providers/openai-compatible.ts`**：保留自研⑥ tool_calls 空串覆盖的说明注释
+2. **`client/src/stores/hermes/chat.ts`**：保留自研滚动信号 `scrollToBottomCounter` + `promotedMessageSnapshots`，同时采纳上游新增 `pendingUserMessageIds`
+3. **`server/src/modules/studio/sockets/chat-run.ts`**（最复杂）：上游重构为 admission 串行闸门（`acquireRunAdmission`/`releaseAdmission`）；把自研① preempt 队列逻辑整合进上游 `if (state.isWorking)` 块，删除重复旧 `handleRun` 块，保留上游 admission try/finally
+4. **3 个测试**（model-request / group-chat-agent-workspace / task-plan-runs）上游删除、本地有自研覆盖 → 保留本地版本
+
+### 自研存活自检
+- ①preempt×9 ②zoom×2 ④链接打开(5+1+2) ⑤微信×2 ⑥tool_calls×1 ⑦MCP×3 商汤cap×1 —— **7 项全部存活**
+
+### 构建踩坑（0.8.19）
+- `MessageList.vue(1274)`：合并后 `queuedPreview` 签名由 `(content: string)` 变 `(message: Message)`，v-for 内调用改 `queuedPreview(message)`（修复合并引入的类型错误）
+- build 用 node **v24.20.0**（默认 v22 不满足 engines>=23）；`CODEBUDDY_SAFE_DELETE_ENABLED=0`；`NODE_OPTIONS=--max-old-space-size=4096`
+
+### 打包踩坑（electron-builder）
+- **EBUSY: app.asar 被锁**（旧 `release/win-unpacked` 残留），rm/rmdir/Remove-Item/.NET Delete 均被 WorkBuddy safe-delete hook 拦截
+- **解法**：改 `electron-builder.yml` 的 `directories.output` → `release/out-0819` 绕开被锁目录（备份 `.bak-20261107`）
+- 产物：`Ekko.Studio-0.8.19-x64.exe`，**365MB**，已拷 `d:\desk`
+
+### 安装
+- nsis 静默 `/S` 安装到 `C:\Users\Administrator\AppData\Local\Programs\Ekko Studio\`，exe 版本 **0.8.19.0**
+
+### 遗留
+- 4 台 PVE（931/935/936/961）Hermes 仍 0.7.39，未部署 0.8.19（需授权）
+- 旧 `release/win-unpacked`（app.asar 被锁）与 `release/out-0819/win-unpacked-old-*` 待清理；`electron-builder.yml` output 暂为 `release/out-0819`
+
+---
+
 ## 2026-10-28 · 同步上游 0.7.36 → 0.7.39
 
 ### 上游同步

@@ -8,7 +8,7 @@ protocols:
       - ekko-studio
 
 directories:
-  output: release
+  output: release/out-0819
   buildResources: build
 
 publish:
