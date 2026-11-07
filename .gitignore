@@ -72,3 +72,8 @@ NUL
 .hermes-ops/
 *.bak-*
 /release/tos/
+# 运行时/构建杂物（961 及 PVE 实测会生成，避免污染「工作区干净」终检）
+.ekko/
+sql-data/
+dist.backup/
+dist.bak*/
