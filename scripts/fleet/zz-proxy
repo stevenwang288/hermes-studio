@@ -1,0 +1,231 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+zz-proxy —— 本机翻墙 (mihomo / clash.meta) 运维 CLI
+
+设计目标：让 agent 或人「一条命令」完成：查状态、测速、切最优节点、验证出网。
+安装位置：/usr/local/bin/zz-proxy
+配套技能：<profile>/skills/zz-proxy-switch/SKILL.md
+
+约定（全集群统一）：
+  - mihomo 控制 API : http://127.0.0.1:9090
+  - 混合代理端口     : 127.0.0.1:7890  (HTTP + SOCKS5)
+  - TUN              : 关闭（服务器只用 7890 代理，避免单节点故障拖垮整机网络）
+  - 自动择优分组     : AUTO (url-test, 180s, tolerance 50ms)
+  - 手动覆盖分组     : PROXY (默认 AUTO)
+"""
+import json
+import subprocess
+import sys
+import urllib.parse
+import urllib.request
+
+API = "http://127.0.0.1:9090"
+PROXY = "http://127.0.0.1:7890"
+TEST_URL = "https://www.gstatic.com/generate_204"
+FAKE_WORDS = ("剩余流量", "套餐到期", "到期时间", "官网", "订阅", "重置", "流量重置")
+
+
+def _req(path, method="GET", timeout=15):
+    req = urllib.request.Request(API + path, method=method)
+    if method == "PUT":
+        req.add_header("Content-Type", "application/json")
+        data = b"{}"
+    else:
+        data = None
+    with urllib.request.urlopen(req, data=data, timeout=timeout) as r:
+        body = r.read().decode("utf-8", "replace")
+    return json.loads(body) if body.strip() else {}
+
+
+def _put(path, payload):
+    req = urllib.request.Request(API + path, method="PUT",
+                                 data=json.dumps(payload).encode(),
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return r.status
+
+
+def _http_code(url, use_proxy=True, timeout=15):
+    cmd = ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code} %{time_total}",
+           "-m", str(timeout)]
+    if use_proxy:
+        cmd += ["-x", PROXY]
+    cmd.append(url)
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5).stdout.strip()
+        return out or "000 0"
+    except Exception:
+        return "000 0"
+
+
+def _is_fake(name):
+    return any(w in name for w in FAKE_WORDS)
+
+
+def cmd_status():
+    try:
+        ver = _req("/version").get("version", "?")
+    except Exception as e:
+        print("[x] mihomo 控制 API 不可用 (%s)，请执行: systemctl status mihomo" % e)
+        return 1
+    print("mihomo 版本      : %s" % ver)
+    try:
+        auto = _req("/proxies/AUTO")
+        now, allp = auto.get("now", "?"), auto.get("all", [])
+        real = [x for x in allp if not _is_fake(x)]
+        print("自动择优(AUTO)   : %s" % now)
+        print("候选真实节点数   : %d (已排除伪节点 %d)" % (len(real), len(allp) - len(real)))
+    except Exception:
+        print("自动择优(AUTO)   : 读取失败")
+    try:
+        d = _req("/proxies/%s/delay?timeout=5000&url=%s" % (urllib.parse.quote(now), urllib.parse.quote(TEST_URL)))
+        print("当前节点延迟     : %sms" % d.get("delay", "超时"))
+    except Exception:
+        print("当前节点延迟     : 测速失败/超时")
+    try:
+        cfg = _req("/configs")
+        print("TUN              : %s (应为 false)" % cfg.get("tun", {}).get("enable"))
+        print("mixed-port       : %s (应为 7890)" % cfg.get("mixed-port"))
+    except Exception:
+        pass
+    echo = subprocess.run(["systemctl", "is-active", "mihomo"], capture_output=True, text=True).stdout.strip()
+    print("mihomo 服务      : %s" % echo)
+    return 0
+
+
+def cmd_test():
+    targets = [
+        ("GitHub       ", "https://github.com"),
+        ("raw.github   ", "https://raw.githubusercontent.com/git/git/master/README.md"),
+        ("Google       ", "https://www.google.com"),
+        ("百度(直连)   ", "http://www.baidu.com"),
+    ]
+    bad = 0
+    for label, url in targets:
+        direct = "直连" in label
+        out = _http_code(url, use_proxy=not direct)
+        code, _, t = out.partition(" ")
+        ok = code in ("200", "301", "302")
+        if not ok:
+            bad += 1
+        print("  %s %s  %s  (%ss)" % ("OK  " if ok else "FAIL", label, code, t))
+    print("\n结论: %s" % ("代理链路正常" if bad == 0 else "有 %d 项异常，建议 zz-proxy best 换节点" % bad))
+    return 0 if bad == 0 else 1
+
+
+def _group_delays(group="AUTO", timeout=5000):
+    path = "/group/%s/delay?timeout=%d&url=%s" % (
+        urllib.parse.quote(group), timeout, urllib.parse.quote(TEST_URL))
+    try:
+        data = _req(path, timeout=60)
+    except Exception as e:
+        print("[x] 测速失败: %s" % e)
+        return {}
+    return {k: v for k, v in data.items() if isinstance(v, int) and not _is_fake(k)}
+
+
+def cmd_list(n=10):
+    d = _group_delays()
+    if not d:
+        print("无可用延迟数据")
+        return 1
+    items = sorted(d.items(), key=lambda x: x[1])
+    print("最快 %d / 共 %d 个真实节点：" % (min(n, len(items)), len(items)))
+    for name, ms in items[:n]:
+        print("  %4dms  %s" % (ms, name))
+    print("\n最慢 3 个：")
+    for name, ms in items[-3:]:
+        print("  %4dms  %s" % (ms, name))
+    return 0
+
+
+def cmd_best(switch=True):
+    d = _group_delays()
+    if not d:
+        print("无可用延迟数据，代理可能整体故障（检查 mihomo / 订阅是否过期）")
+        return 1
+    name, ms = min(d.items(), key=lambda x: x[1])
+    print("最快节点: %s (%dms)" % (name, ms))
+    if switch:
+        try:
+            _put("/proxies/PROXY", {"name": name})
+            print("已把 PROXY 组手动钉到该节点。恢复自动择优请执行: zz-proxy auto")
+        except Exception as e:
+            print("[x] 切换失败: %s" % e)
+            return 1
+    return 0
+
+
+def cmd_node(name):
+    try:
+        _put("/proxies/PROXY", {"name": name})
+        print("PROXY 组已切到: %s" % name)
+        return 0
+    except Exception as e:
+        print("[x] 切换失败(节点名要完全一致，可用 zz-proxy list 查看): %s" % e)
+        return 1
+
+
+def cmd_auto():
+    try:
+        _put("/proxies/PROXY", {"name": "AUTO"})
+        print("已恢复自动择优 (PROXY -> AUTO)")
+        return 0
+    except Exception as e:
+        print("[x] 失败: %s" % e)
+        return 1
+
+
+def cmd_refresh():
+    try:
+        st = _put("/providers/proxies/yfjc", {})
+        print("订阅刷新请求已发出 (HTTP %s)，10 秒后可用 zz-proxy status 确认" % st)
+        return 0
+    except Exception as e:
+        print("[x] 刷新失败: %s" % e)
+        return 1
+
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] in ("help", "-h", "--help"):
+        print(__doc__.strip())
+        print("""
+用法:
+  zz-proxy status        看服务状态 / 当前节点 / 延迟 / 是否开了 TUN
+  zz-proxy test          通过代理测 GitHub、raw、Google、百度
+  zz-proxy list [N]      测速并列出最快 N 个节点（默认 10）
+  zz-proxy best          全组测速，自动切到最快节点
+  zz-proxy node <名称>   手动钉到指定节点
+  zz-proxy auto          恢复自动择优（推荐，默认就是它）
+  zz-proxy refresh       强制刷新订阅（节点列表更新）
+
+平时不用手动切：AUTO 组每 180 秒自动测速，节点挂了会自动换。
+只有"整组都慢/都挂"时才需要 zz-proxy best 或 refresh。
+""")
+        return 0
+    cmd, rest = args[0], args[1:]
+    if cmd == "status":
+        return cmd_status()
+    if cmd == "test":
+        return cmd_test()
+    if cmd == "list":
+        return cmd_list(int(rest[0]) if rest and rest[0].isdigit() else 10)
+    if cmd == "best":
+        return cmd_best()
+    if cmd == "node":
+        if not rest:
+            print("用法: zz-proxy node <节点名称>")
+            return 1
+        return cmd_node(rest[0])
+    if cmd == "auto":
+        return cmd_auto()
+    if cmd == "refresh":
+        return cmd_refresh()
+    print("未知子命令: %s（试试 zz-proxy help）" % cmd)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

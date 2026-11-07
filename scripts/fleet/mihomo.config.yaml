@@ -1,0 +1,114 @@
+external-controller: 127.0.0.1:9090
+mixed-port: 7890
+allow-lan: true
+mode: rule
+log-level: info
+ipv6: false
+unified-delay: true
+tcp-concurrent: true
+
+tun:
+  enable: false
+  stack: system
+  dns-hijack:
+    - any:53
+  auto-route: true
+  auto-redirect: true
+  auto-detect-interface: true
+
+dns:
+  enable: true
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - '*.lan'
+    - '*.local'
+    - '+.msftconnecttest.com'
+    - '+.msftncsi.com'
+    - '+.google.cn'
+    - '+.baidu.com'
+  nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  fallback:
+    - 8.8.8.8
+    - 1.1.1.1
+  fallback-filter:
+    geoip: true
+    geoip-code: CN
+    ipcidr:
+      - 240.0.0.0/4
+
+proxy-providers:
+  yfjc:
+    type: http
+    url: "https://yfjc.xyz/api/v1/client/subscribe?token=969896b34e40bd1d494be8326f54b72a"
+    interval: 86400
+    path: ./providers/yfjc.yaml
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 300
+
+
+# SG-Alibaba 独立节点 (出口阿里云新加坡, 未被Google拉黑)
+proxies:
+  - name: "SG-Alibaba"
+    type: vmess
+    server: saas.sin.fan
+    port: 443
+    uuid: b5c445d1-8e59-465f-af0c-1f4193d15693
+    alterId: 0
+    cipher: none
+    tls: true
+    servername: non-cars-specialist-attraction.trycloudflare.com
+    network: ws
+    ws-opts:
+      path: /vmess-argo?ed=2560
+      headers:
+        Host: non-cars-specialist-attraction.trycloudflare.com
+    client-fingerprint: chrome
+
+proxy-groups:
+  # AUTO: 自动测速择优。interval=180s 重新测一次，tolerance=50ms 内不切换(避免抖动)，
+  # lazy=false 强制一直测；exclude-filter 排除订阅里的"剩余流量/套餐到期"伪节点，
+  # 否则测速会把它们当节点选中 —— 这是 2026-11-08 之前 935/961 出现
+  # "当前节点 = 剩余流量：14.65 GB" 的原因。
+  - name: AUTO
+    type: url-test
+    use:
+      - yfjc
+    url: https://www.gstatic.com/generate_204
+    interval: 180
+    tolerance: 50
+    lazy: false
+    max-failed-times: 3
+    exclude-filter: "剩余流量|套餐到期|到期时间|官网|订阅|重置|流量重置"
+
+  # PROXY: 手动覆盖入口，默认仍走 AUTO(自动择优)。
+  - name: PROXY
+    type: select
+    proxies:
+      - AUTO
+      - SG-Alibaba
+    use:
+      - yfjc
+    default: AUTO
+    exclude-filter: "剩余流量|套餐到期|到期时间|官网|订阅|重置|流量重置"
+
+rules:
+  - DOMAIN-SUFFIX,generativelanguage.googleapis.com,PROXY
+  - DOMAIN-SUFFIX,googleapis.com,PROXY
+  - DOMAIN-SUFFIX,youtube.com,PROXY
+  - DOMAIN-SUFFIX,ytimg.com,PROXY
+  - DOMAIN-SUFFIX,googlevideo.com,PROXY
+  - DOMAIN-SUFFIX,ggpht.com,PROXY
+  - DOMAIN-SUFFIX,googleusercontent.com,PROXY
+  - DOMAIN-SUFFIX,huggingface.co,PROXY
+  - DOMAIN-SUFFIX,hf.co,PROXY
+
+
+  - GEOIP,CN,DIRECT
+  - DOMAIN-SUFFIX,cn,DIRECT
+  - MATCH,PROXY

@@ -5,6 +5,54 @@
 
 ---
 
+## 2026-11-08 00:45 · 4 台 PVE 全量对齐（0.8.19 + 统一翻墙 + 统一模型）
+
+### 部署结果（4 台全部 `0.8.19` / `9a7eb9a9`）
+| 机器 | 目录 | 版本 | 服务 | 8648 | HTTP | 模型 |
+|---|---|---|---|---|---|---|
+| 931 | `/opt/hermes-studio-ekko` | 0.8.19 | active, NRestarts=0 | 单监听/单进程 | 200 | 商汤6 + 腾讯14 + 961-NVIDIA-CN(4) |
+| 935 | `/opt/hermes-studio` | 0.8.19 | active | 单监听 | 200 | 商汤6 + 腾讯14 + OpenCode(9) + NVIDIA(4) |
+| 936 | `/opt/hermes-studio-fork` | 0.8.19 | active | 单监听 | 200 | 商汤6 + 腾讯14 + OpenCode(9) + NVIDIA(4) |
+| 961 | `/opt/hermes-studio` | 0.8.19 | active | 单监听 | 200 | 商汤6 + 腾讯14 + apihub |
+
+机器专属 provider 各自保留（`961-OpenCode` / `961-NVIDIA-CN` / `apihub.agnes-ai.com`）。
+
+### 翻墙统一（原来 4 台不一致，931 直接是坏的）
+**发现的差异**：
+- **931 代理完全失效**：配置里 `tun.enable: true` 且 TUN 真正接管了路由（`198.18.0.0/30 dev Meta`），
+  选中的节点连不通 → `dial tcp 52.192.216.226:443: i/o timeout` → 所有出口全断。
+  935/961 同样开着 `tun.enable: true` 但 TUN 没生效，所以只走 7890，反而是好的。
+- 936 的健康检查 URL 被改成 `api.tavily.com`（其它三台是 `gstatic/generate_204`）。
+- 935 的 providers 目录残留 `yfjc.yaml.bak-20261028`。
+- 订阅里混有"剩余流量/套餐到期"伪节点，AUTO 测速会把它们当候选（曾出现"当前节点=剩余流量：14.65 GB"）。
+
+**统一动作**（配置见 `scripts/fleet/mihomo.config.yaml`）：
+- `tun.enable: false`（4 台）—— 服务器只用 7890，避免单节点故障拖垮整机网络
+- 健康检查统一 `https://www.gstatic.com/generate_204`
+- `AUTO` = `url-test`，`interval 180`、`tolerance 50`、`lazy false`、`max-failed-times 3`
+- `AUTO`/`PROXY` 都加 `exclude-filter` 排除伪节点
+- 规则末尾改为 **`MATCH,PROXY`**（PROXY 默认 = AUTO，平时行为不变，但支持手动接管）
+- 清掉 `.bak` 与 provider 缓存，4 台强制重下同一份订阅（44303 bytes，44 个真实节点）
+
+**结果**：4 台 GitHub / raw / Google 全通，节点延迟 56~102ms，各自选到的最快节点可以不同（正常）。
+
+### 给机器的"换节点能力"（不是写死脚本，是让 agent 自己会）
+- **`/usr/local/bin/zz-proxy`**：`status / test / list N / best / node <名> / auto / refresh`
+- **技能 `zz-proxy-switch`**（装进各机 profile 的 `skills/`）：告诉 agent 什么现象该用哪条命令
+  —— GitHub 超时、`GnuTLS handshake failed`、curl 000、npm 卡住时先 `zz-proxy test`，
+  失败就 `zz-proxy best`，再不行 `zz-proxy refresh`，仍不通就停下来报告（别反复重试）
+- 4 台原本就有 skills 机制（目录下有 `SKILL.md` 即是一个技能），共 35~127 个已有技能，直接沿用
+
+### 踩坑（已写进 MAINTAIN.md 4.4）
+1. `git fetch origin sync` 只更新 `FETCH_HEAD`，**不更新 `refs/remotes/origin/sync`**
+   → 曾因此把 931 倒退回 0.7.35。必须 `git reset --hard $(git rev-parse FETCH_HEAD)`
+2. **`pkill -f 'dist/server/index.js'` 会把执行部署脚本的 shell 自己杀掉**
+   → 改用「查 8648 监听 PID 再 kill」
+3. 重启时旧进程 `free(): invalid pointer` abort（0.8.19 优雅关闭 bug）→ core-dump 但新进程正常，不是故障
+4. 961 首次 `git fetch` 遇 `GnuTLS handshake failed` → 部署脚本已加 5 次重试
+
+---
+
 ## 2026-11-07 23:55 · 精简为「只 2 项自研」+ 重建并重装桌面版
 
 ### 决策

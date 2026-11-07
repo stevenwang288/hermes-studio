@@ -262,9 +262,52 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8648
 
 **`dist` mtime 是旧的 = 服务在跑旧代码**，必须重装依赖重构建。
 
+### 4.4 部署踩过的两个坑（2026-11-08）
+
+1. **`git fetch origin sync` 不会更新 `refs/remotes/origin/sync`**，只更新 `FETCH_HEAD`。
+   所以必须 `git reset --hard $(git rev-parse FETCH_HEAD)`，
+   不要用 `origin/sync` —— 曾因此把 931 倒退回 0.7.35。
+2. **绝不要用 `pkill -f 'dist/server/index.js'`**：bash 执行脚本时命令行里就含这个字符串，
+   pkill 会把**脚本自身**杀掉，导致"部署到一半服务没起来"。
+   正确做法：查 8648 的监听 PID 再 kill：
+   ```bash
+   PID=$(ss -lntp | grep ':8648' | grep -oP 'pid=\K[0-9]+' | head -1); [ -n "$PID" ] && kill -9 "$PID"
+   ```
+3. **重启时旧进程会 `free(): invalid pointer` abort**（0.8.19 已知的优雅关闭 bug）。
+   表现：`systemctl restart` 时 journal 出现 `core-dump`，但新进程正常、`NRestarts=0`。
+   **不影响服务**，看到别当成故障。
+
+### 4.5 4 台标准状态（2026-11-08 校准，4 台必须一致）
+
+| 项 | 标准值 |
+|---|---|
+| 版本 | **0.8.19**，HEAD = 远端 `sync`（当前 `9a7eb9a9`） |
+| 服务 | **只有 `ekko-studio`**，`systemctl restart ekko-studio` |
+| 端口 | 8648 单监听、单进程、HTTP 200、`NRestarts=0` |
+| 翻墙 | mihomo `mixed-port 7890` + API `9090`，**TUN 必须 false**，配置见 `scripts/fleet/mihomo.config.yaml` |
+| 节点 | AUTO 分组 `url-test`，180s 自动测速择优，伪节点已排除；4 台各自选到的最快节点可以不同（正常） |
+| 运维命令 | **`zz-proxy`**（`status/test/list/best/node/auto/refresh`），见 `scripts/fleet/zz-proxy` |
+| agent 技能 | `zz-proxy-switch`（装在 `<profile>/skills/`，让 agent 知道何时换节点），见 `scripts/fleet/zz-proxy-switch.SKILL.md` |
+| 模型 | **商汤 6 个 + 腾讯 14 个**（与 WorkBuddy `models.json` 对齐）；机器专属 provider（`961-OpenCode`/`961-NVIDIA-CN`/`apihub`）各自保留 |
+
+**4 台代理标准件安装位置**：`/usr/local/bin/zz-proxy`；技能目录：
+
+| 机器 | profile skills 目录 |
+|---|---|
+| 931 / 935 / 961 | `/root/.hermes/skills/zz-proxy-switch/` |
+| 936（服务跑 ubuntu） | `/home/ubuntu/.hermes/skills/zz-proxy-switch/` |
+
+装法（内容在仓库 `scripts/fleet/`）：
+```bash
+cp scripts/fleet/zz-proxy /usr/local/bin/zz-proxy && chmod 755 /usr/local/bin/zz-proxy
+mkdir -p <skills目录>/zz-proxy-switch && cp scripts/fleet/zz-proxy-switch.SKILL.md <skills目录>/zz-proxy-switch/SKILL.md
+cp scripts/fleet/mihomo.config.yaml /etc/mihomo/config.yaml   # 先备份！
+systemctl restart mihomo
+```
+
 ---
 
-## 4.5 浏览器端功能验收（升级后必做）
+## 4.6 浏览器端功能验收（升级后必做）
 
 **判据：每台打开 Web UI，发一道加法题，AI 答对才算通过。**
 
