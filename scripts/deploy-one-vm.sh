@@ -10,11 +10,13 @@ LOG=/tmp/deploy_$V.log
 exec >> \$LOG 2>&1
 
 case $V in
-  936) export PATH="/home/ubuntu/.nvm/versions/node/v24.20.0/bin:\$PATH"; DIR=/opt/hermes-studio-fork; SRV="hermes-web-ui";;
-  931) export PATH="\$HOME/.nvm/versions/node/v24.20.0/bin:\$PATH"; DIR=/opt/hermes-studio-ekko; SRV="hermes-web-ui hermes-gateway";;
-  935) export PATH="\$HOME/.nvm/versions/node/v24.20.0/bin:\$PATH"; DIR=/opt/hermes-studio; SRV="hermes-studio hermes-gateway";;
-  961) export PATH="\$HOME/.nvm/versions/node/v24.20.0/bin:\$PATH"; DIR=/opt/hermes-studio; SRV="hermes-studio hermes-gateway";;
+  936) export PATH="/home/ubuntu/.nvm/versions/node/v24.20.0/bin:\$PATH"; DIR=/opt/hermes-studio-fork; SRV="ekko-studio";;
+  931) export PATH="\$HOME/.nvm/versions/node/v24.20.0/bin:\$PATH"; DIR=/opt/hermes-studio-ekko; SRV="ekko-studio";;
+  935) export PATH="\$HOME/.nvm/versions/node/v24.20.0/bin:\$PATH"; DIR=/opt/hermes-studio; SRV="ekko-studio";;
+  961) export PATH="\$HOME/.nvm/versions/node/v24.20.0/bin:\$PATH"; DIR=/opt/hermes-studio; SRV="ekko-studio";;
 esac
+# 铁律: 唯一服务名 ekko-studio。旧名 hermes-studio/hermes-web-ui/hermes-gateway 已弃用,
+# 其 unit 已移至 /root/systemd-legacy-backup/。restart 旧名会抢 8648 造成崩溃循环。
 
 echo "########## VM $V START \$(date '+%F %T') ##########"
 cd \$DIR || { echo "FATAL: no dir \$DIR"; exit 1; }
@@ -55,13 +57,24 @@ echo "dist_mtime=\$(stat -c %y dist/server/index.js)"
 chown -R ubuntu:ubuntu dist packages 2>/dev/null || true
 
 echo "--- restart ---"
+for legacy in hermes-studio hermes-web-ui hermes-gateway; do
+  systemctl stop \$legacy 2>/dev/null && echo "WARN: 停掉了遗留服务 \$legacy" || true
+done
 systemctl restart \$SRV
-sleep 6
+sleep 8
 for s in \$SRV; do echo "svc \$s = \$(systemctl is-active \$s)"; done
+LISTENERS=\$(ss -lnt | grep -c ':8648' || true)
+PROCS=\$(ps -eo cmd | grep -c '[d]ist/server/index.js' || true)
+echo "listeners_8648=\$LISTENERS (must=1)"
+echo "procs=\$PROCS (must=1)"
+if [ "\$LISTENERS" != "1" ] || [ "\$PROCS" != "1" ]; then
+  echo "FATAL: 重复服务打架 (8648 监听/进程数不为 1)"; exit 5
+fi
 
 echo "--- verify ---"
 echo "version=\$(node -e "console.log(require('./package.json').version)")"
 echo "http=\$(curl -s -o /dev/null -w '%{http_code}' -m 8 http://127.0.0.1:8648)"
+echo "restarts=\$(systemctl show \$SRV -p NRestarts --value)"
 echo "########## VM $V DONE \$(date '+%F %T') ##########"
 EOF
 echo "=========== VM $V 关键结果 ==========="
