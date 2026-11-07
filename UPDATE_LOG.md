@@ -5,6 +5,39 @@
 
 ---
 
+## 2026-11-08 01:05 · 4 台 PVE 模型配置与 Windows 端完全一致（只 3 组）
+
+**目标**：Windows 桌面版界面只有 3 组 —— 商汤(6) / 腾讯(14) / apihub.agnes-ai.com(9，实时拉取)。4 台 PVE 必须一模一样。
+
+**查清 provider 的 4 个来源**（只改 config.yaml 不够）：
+1. `~/.hermes/config.yaml` → `custom_providers`（provider 定义 + 模型参数）
+2. `~/.hermes/auth.json` → `credential_pool`（旧的 provider 凭据会让它继续出现在列表里）
+3. `~/.hermes/config.yaml` 根键 `default_provider` / `default_model` / `model_overrides`（指向已删 provider 就会残留）
+4. `~/.hermes-web-ui/hermes-web-ui.db` 的 `model_context` 表 + `coding-agent/model/default/custom_*` 目录
+
+**另**：`~/.hermes-web-ui/cache/provider-model-catalog.json` 只存"每个 provider 的模型清单"，**不决定界面显示哪些 provider**
+（证据：Windows 端缓存里也有 atria / token.sensenova.cn 两条，界面仍只显示 3 组）。
+
+**操作**（931/935/936/961 相同）：
+- `custom_providers` 整段替换为 Windows 端原文（114 行，逐字复制）→ 只剩 商汤 / 腾讯 / apihub
+- `auth.json` 的 `providers` / `credential_pool` 清空（Windows 端这两个本来就是空的）
+- 删除根键 `default_provider` / `default_model` / `model_overrides`（Windows 端没有这几个键）
+- 931：`model_context` 删掉 16 行旧 provider 记录 + 陈旧目录移到 `_stale-model-dirs-*`
+- 删掉的行目录与 DB 均有 `.bak-时间戳` 备份
+- 重启顺序必须是 **停服务 → 删缓存 → 启动**（先删后重启会被旧进程回写）
+
+**结果（4 台一致）**：
+```
+version=0.8.19  HEAD=e7a48d230  svc=active  8648 单监听  HTTP 200
+providers: 商汤(6, 默认 sensenova/deepseek-flash)
+           腾讯(14, 默认 腾讯/hy4-preview)
+           apihub.agnes-ai.com(0 个静态, 默认 agnes-3.0-flash —— 模型由 /v1/models 实时拉取)
+auth.credential_pool: []（961 有 custom:商汤，属正常）
+default_provider 键: 已删除
+```
+
+---
+
 ## 2026-11-08 00:45 · 4 台 PVE 全量对齐（0.8.19 + 统一翻墙 + 统一模型）
 
 ### 部署结果（4 台全部 `0.8.19` / `9a7eb9a9`）
