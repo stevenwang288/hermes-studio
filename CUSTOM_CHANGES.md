@@ -11,7 +11,7 @@
 
 | 分支 | 版本 | 说明 |
 |------|------|------|
-| `sync` | **0.8.19**（2026-11-07 校准） | 唯一有效分支。= 上游 `main` 最新（`8c894a69`）+ 自研功能（③路径显示已移除；⑨环境探测误判修复），已通过 `npm run build` 验证 |
+| `sync` | **0.8.19**（2026-11-07 校准） | 唯一有效分支。= 上游 `main` 最新（`8c894a69`）+ **仅 2 项自研功能（① 消息队列、② Windows 桌面字体缩放）**，已通过 `npm run build` 验证 |
 | `main` | 0.7.21 | 停用的旧基线，**勿用** |
 
 **流程固化（2026-10-15）**：新增 [`SYNC-CHECKLIST.md`](SYNC-CHECKLIST.md)（10 步执行清单，把「推自己的 GitHub」「更新文档记账」两步显式列为不可跳过）+
@@ -101,7 +101,18 @@
 
 ---
 
-## 保留的自研功能（7 项）
+## 保留的自研功能（**2 项**）
+
+> **⚠️ 2026-11-07 大哥拍板：本 fork 只保留 ① 消息队列 和 ② Windows 桌面字体缩放，其余全部撤销、回到上游原样。**
+> 已撤销（对应文件已 `git checkout` 回上游，`scripts/self-check-custom.mjs` 也不再校验）：
+> ③ 路径完整显示（2026-10-16 已移除）、④ 链接强制 Chrome + 内置浏览器 zoom 修复、⑤ 微信扫码 DM 策略、
+> ⑥ 流式 tool_calls 空串修复、⑦ update_plan/任务卡 MCP 常驻、⑧ 商汤 384000 output cap、⑨ ENOENT 误判修复，
+> 以及 10-28 批次带进来的 `task-plan-runs.ts` 任务卡结算改动。
+>
+> 撤销后的验证结果（2026-11-07）：`npm run build` exit=0、dist 13.0mb、自研自检 **7/7 PASS**（只含 ①②）。
+> 与上游的源码差异收敛到 **7 个文件**：`chat-run.ts`、`chat-run/abort.ts`、`contracts/runs/session.ts`、
+> `stores/hermes/chat.ts`、`MessageList.vue`、`ChatInput.vue`、`api/studio/chat.ts`（以上全属 ①）
+> + `desktop/src/main/index.ts`（②）。
 
 ### 1. 消息队列
 
@@ -116,7 +127,10 @@
 | `client/src/components/hermes/chat/MessageList.vue` | 队列项「↑ 立即发送」按钮 |
 | `client/src/components/hermes/chat/ChatInput.vue` | ESC / Ctrl+Enter 放行队首 |
 | `client/src/api/studio/chat.ts` | `StartRunRequest.preempt?: boolean` |
-| `tests/server/chat-run-promote.test.ts` | 并发测试 |
+
+> 注：原 `tests/server/chat-run-promote.test.ts` 已于 2026-11-07 删除 —— 它 import 的是 0.7 的
+> `services/hermes/run-chat` 路径，0.8 改成依赖注入后无法构造 `ChatRunSocket`，属**永远跑不过的死测试**。
+> ① 目前靠 `scripts/self-check-custom.mjs` 的 6 个 grep 命点守护 + 桌面实机 ESC/Ctrl+Enter 验证。
 
 ### 2. Windows 桌面版字体缩放
 

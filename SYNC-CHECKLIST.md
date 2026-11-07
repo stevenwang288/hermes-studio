@@ -76,10 +76,10 @@ cd packages/desktop && npx tsc -p tsconfig.json --noEmit # 必须 exit=0
 node scripts/self-check-custom.mjs
 ```
 
-判据：**全部命点 PASS**（消息队列 4 个端点 / 字体缩放 / 链接默认浏览器+强制Chrome+zoom修复 /
-微信DM策略 / tool_calls 空串修复 / MCP常驻 / 商汤 384000 cap）。
+判据：**全部命点 PASS**（① 消息队列 6 个命点：preempt / promote_all / queued_messages / store / ChatInput / MessageList；② 桌面字体缩放）。
 有 FAIL → 回第 2 步按冲突铁律重新应用自研代码，别往下走。
-> 旧自研③「路径完整显示(workspace-badge)」已于 2026-10-16 主动移除（改随上游），编号保留不复用。
+> **2026-11-07 大哥拍板：只保留 ① 消息队列 和 ② Windows 字体缩放。** 原 ③④⑤⑥⑦⑧⑨ 全部撤销回上游
+> （③ 路径完整显示 2026-10-16 已移除），编号保留不复用，详见 `CUSTOM_CHANGES.md`。
 
 ---
 

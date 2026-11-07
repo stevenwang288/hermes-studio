@@ -274,7 +274,7 @@ export async function markAbortCompleted(
 ) {
   const state = sessionMap.get(sessionId)
   if (!state) return
-const activeRunId = state.runId
+  const activeRunId = state.runId
   const runMarker = state.activeRunMarker
   const pendingRequest = abortRequests.get(state)
   if (pendingRequest) await pendingRequest
@@ -335,7 +335,7 @@ const activeRunId = state.runId
       ...usagePayload,
     })
     emitToSession(nsp, socket, sessionId, 'run.queued', {
-event: 'run.queued',
+      event: 'run.queued',
       queue_length: state.queue.length,
       dequeued_queue_id: next.queue_id,
       queued_messages: state.queue.filter(item => item.displayInput !== null).map(item => ({

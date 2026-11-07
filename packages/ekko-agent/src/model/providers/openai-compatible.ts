@@ -236,8 +236,6 @@ export class OpenAICompatibleModelClient implements ModelClient {
           for (const toolCallDelta of choice.delta?.tool_calls ?? []) {
             const index = toolCallDelta.index ?? 0
             const current = toolCalls.get(index) ?? { id: '', name: '', argumentsText: '' }
-            // 流式增量协议里后续分片可能带空字符串 id/name(DeepSeek V4.1/商汤实测)——
-            // 空串会覆盖首分片的完整 id/name 导致 invalid_tool_call。|| 只在有值时更新。
             current.id = toolCallDelta.id || current.id
             current.name = toolCallDelta.function?.name || current.name
             current.argumentsText += toolCallDelta.function?.arguments ?? ''

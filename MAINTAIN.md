@@ -19,7 +19,7 @@
 
 `stevenwang288/hermes-studio` = 上游 `EKKOLearnAI/ekko-studio` 的 fork。
 
-- 以官方基线为底，**只保留 7 项自研功能**，其余一律跟随上游（品牌/图标/安装路径都是官方的，不做 fork 标记）
+- 以官方基线为底，**只保留 2 项自研功能（① 消息队列、② Windows 桌面字体缩放）**，其余一律跟随上游（品牌/图标/安装路径都是官方的，不做 fork 标记）
 - **唯一有效分支：`sync`**。`main` 是废弃的旧基线，不要用
 - 部署到 **5 个终端**：4 台 PVE 虚拟机 + 1 台 Windows 桌面版
 
@@ -154,19 +154,20 @@ node scripts/delivery-verify.mjs
 
 ---
 
-## 3. 7 项自研功能（冲突时保留，别弄丢）
+## 3. 2 项自研功能（冲突时保留，别弄丢）
+
+> **⚠️ 2026-11-07 大哥拍板：只保留 ① 消息队列 和 ② Windows 字体缩放，其余全部撤销回上游。**
+> 已撤销：③ 路径完整显示、④ 链接强制 Chrome + 内置浏览器 zoom 修复、⑤ 微信 DM 策略、
+> ⑥ tool_calls 空串修复、⑦ MCP 常驻、⑧ 商汤 384000 cap、⑨ ENOENT 误判修复，
+> 以及 10-28 批次带入的 `task-plan-runs.ts` 任务卡结算改动。对应文件已 `git checkout` 回上游。
+> `scripts/self-check-custom.mjs` 现在只校验 ①②（7 个命点）。
 
 | # | 功能 | 主要文件 |
 |---|------|----------|
 | 1 | **消息队列**：回复生成中发新消息不打断，排队等待，三种方式逐条放行 | `server/src/modules/studio/sockets/chat-run.ts`<br>`server/src/modules/studio/services/chat-run/abort.ts`<br>`server/src/modules/studio/contracts/runs/session.ts`<br>`client/src/stores/hermes/chat.ts`<br>`client/src/components/hermes/chat/MessageList.vue`<br>`client/src/components/hermes/chat/ChatInput.vue`<br>`client/src/api/studio/chat.ts` |
 | 2 | **Windows 桌面版字体缩放**：Ctrl + `+`/`-`/`0`，步进 0.5，范围 −3~4，持久化 `userData/desktop-zoom.json` | `desktop/src/main/index.ts` |
-| 3 | **路径完整显示**：workspace 徽标显示全路径，不截断 | `client/src/components/hermes/chat/ChatPanel.vue` |
-| 4 | **链接默认用 Chrome 打开 + 内置浏览器错位修复**（2026-10-02）：点 URL 不再进内置 WebContentsView（指纹/登录态/代理硬伤），优先 `spawn` 系统 Chrome；`setViewport` 乘 zoomFactor 修复字体缩放后内嵌浏览器错位 | `client/src/utils/desktop-browser.ts`<br>`desktop/src/main/browser/browser-manager.ts`<br>`desktop/src/main/index.ts` |
-| 5 | **微信扫码保存自动开 DM 策略**（2026-10-03）：扫码保存凭据时额外写 `WEIXIN_DM_POLICY=open` + `WEIXIN_ALLOW_ALL_USERS=true`，新 bot 开箱即用不被 pairing 策略拒 | `server/src/modules/hermes/controllers/weixin.ts` |
-| 6 | **流式 tool_calls 空串覆盖修复**（2026-10-10）：DeepSeek V4.1/商汤的流式分片会带空串 `id`/`name`，`??` 会让空串覆盖首分片 → `invalid_tool_call`；改用 `\|\|` 只在有值时更新 | `packages/ekko-agent/src/model/providers/openai-compatible.ts` |
-| 7 | **update_plan/任务卡 MCP 工具常驻**（2026-10-13）：bridge 层 `_apply_always_eager_toolsets()` 向运行时注入 `_ALWAYS_EAGER_MCP_TOOLSETS`（0.20.x 白名单式）+ 包装 `is_deferrable_tool_name`（0.21.x defer_tools 式），ekko-studio-interaction toolset 永不延迟。**放 bridge 层 = 随包分发，换机器/升级运行时不丢** | `server/src/modules/hermes/services/bridge/python/hermes_bridge.py` |
 
-测试：`tests/server/chat-run-promote.test.ts`
+测试：无（原 `tests/server/chat-run-promote.test.ts` 是 0.7 路径的死测试，0.8 依赖注入改造后无法构造，已于 2026-11-07 删除）。① 靠 `scripts/self-check-custom.mjs` grep 命点 + 桌面实机验证。
 
 **重应用时的两个必查点**（每次合并后都要确认）：
 

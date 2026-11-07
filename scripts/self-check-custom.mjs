@@ -5,8 +5,9 @@
  * 用法：node scripts/self-check-custom.mjs
  *
  * 逐项 grep 自研命点，确认没有被上游合并吃掉。
- * 注：③「路径完整显示(workspace-badge)」已于 2026-10-16 主动移除（上游已具备该能力，改随上游）。
- *     编号 ①-⑧ 保留不复用，便于对照历史记账。
+ * 2026-11-07 大哥拍板：本 fork **只保留两项**自研功能 —— ① 消息队列、② Windows 桌面字体缩放。
+ * 其余（原 ③④⑤⑥⑦⑧⑨）全部撤销、回到上游原样，不再检查。
+ * 编号保留不复用，便于对照历史记账。
  * 退出码：0 = 全部存活，1 = 有缺失（需要回去在第 2 步按冲突铁律重应用）。
  */
 
@@ -43,49 +44,14 @@ const CHECKS = [
     label: '① 消息队列(输入框 ESC/Ctrl+Enter)',
   },
   {
+    key: 'scrollToBottomCounter',
+    file: 'packages/client/src/components/hermes/chat/MessageList.vue',
+    label: '① 消息队列(放行后滚动到视野)',
+  },
+  {
     key: 'loadDesktopZoomLevel',
     file: 'packages/desktop/src/main/index.ts',
     label: '② 桌面字体缩放',
-  },
-  {
-    key: 'DEFAULT_LINK_OPEN_TARGET',
-    file: 'packages/client/src/utils/desktop-browser.ts',
-    label: '④ 链接默认走系统浏览器',
-  },
-  {
-    key: 'findChromeExecutable',
-    file: 'packages/desktop/src/main/index.ts',
-    label: '④ 强制 Chrome',
-  },
-  {
-    key: 'getZoomFactor',
-    file: 'packages/desktop/src/main/browser/browser-manager.ts',
-    label: '④ 内置浏览器 zoom 错位修复',
-  },
-  {
-    key: 'ALLOW_ALL_USERS',
-    file: 'packages/server/src/modules/hermes/controllers/weixin.ts',
-    label: '⑤ 微信扫码 DM 策略',
-  },
-  {
-    key: 'toolCallDelta.id ||',
-    file: 'packages/ekko-agent/src/model/providers/openai-compatible.ts',
-    label: '⑥ 流式 tool_calls 空串修复',
-  },
-  {
-    key: '_ALWAYS_EAGER',
-    file: 'packages/server/src/modules/hermes/services/bridge/python/hermes_bridge.py',
-    label: '⑦ update_plan/任务卡 MCP 常驻',
-  },
-  {
-    key: '384000',
-    file: 'packages/server/src/modules/coding-agents/services/context-policy.ts',
-    label: '⑧ 商汤 384000 output cap',
-  },
-  {
-    key: "text.includes('spawn node')",
-    file: 'packages/server/src/modules/coding-agents/services/index.ts',
-    label: '⑨ coding-agent 环境探测误判修复(任意ENOENT不再当Node缺失)',
   },
 ];
 
@@ -108,7 +74,8 @@ const grouped = new Map();
 const missing = [];
 
 for (const c of CHECKS) {
-  const r = spawnSync('git', ['grep', '-c', c.key, 'HEAD', '--', c.file], {
+  // 检查工作区实际内容（不带 rev），改完代码立刻能反映，不会因为查 HEAD 而假通过
+  const r = spawnSync('git', ['grep', '-c', c.key, '--', c.file], {
     cwd: ROOT,
     encoding: 'utf8',
     windowsHide: true,

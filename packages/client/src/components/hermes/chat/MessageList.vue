@@ -1244,11 +1244,11 @@ defineExpose({
           </div>
           <div class="clarify-float-input-row">
             <NInput
-                          v-model:value="clarifyResponse"
-                          size="small"
-                          :type="visibleClarify.responseMode === 'editor' ? 'textarea' : 'text'"
-                          :placeholder="t('chat.clarifyPlaceholder')"
-                        />
+              v-model:value="clarifyResponse"
+              size="small"
+              :type="visibleClarify.responseMode === 'editor' ? 'textarea' : 'text'"
+              :placeholder="t('chat.clarifyPlaceholder')"
+            />
             <NButton size="small" type="primary" @click="handleClarify()">
               {{ t("chat.clarifySubmit") }}
             </NButton>
