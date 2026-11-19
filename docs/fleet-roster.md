@@ -28,14 +28,30 @@
 
 ### 2.1 provider 命名（**按机器不同，写脚本时必须区分**）
 
-| 机器 | 商汤 provider | 腾讯 provider | gateway 模型 ID 前缀 |
-|---|---|---|---|
-| 本机 | `custom:商汤` | `custom:腾讯` | `商汤/` |
-| 931 | `custom:sensenova` | `custom:tencent` | `sensenova/` |
-| 936 | `custom:商汤` | `custom:腾讯` | `商汤/` |
-| 961 | `custom:sensenova` | `custom:腾讯` | `sensenova/` |
+| 机器 | 商汤 provider | 腾讯 provider | 商汤 gateway ID | 腾讯 gateway ID |
+|---|---|---|---|---|
+| 本机 | `custom:商汤` | `custom:腾讯` | `商汤/sensenova/<m>` | `腾讯/腾讯/<m>` |
+| 931 | `custom:sensenova` | `custom:tencent` | **`sensenova/sensenova/<m>`** | **`tencent/腾讯/<m>`** |
+| 936 | `custom:商汤` | `custom:腾讯` | `商汤/sensenova/<m>` | `腾讯/腾讯/<m>` |
+| 961 | `custom:sensenova` | `custom:腾讯` | `sensenova/sensenova/<m>` | `腾讯/腾讯/<m>` |
 
 > 改成一致的实测结果：**该 provider 会直接从 gateway 消失**（961 验证）。所以只统一参数，不统一名字。
+> **931 的商汤 ID 是双段 `sensenova/sensenova/`**（provider 名和模型前缀都叫 sensenova），最容易搞错。
+
+### 2.1.1 ⚠️ opencode 只能用 v1
+
+Studio 0.8.28 的 opencode adapter 写死 v1 CLI 语法：
+
+```
+opencode run --format json --agent build --auto --thinking --dir <wd>
+```
+
+**v2 的 `opencode run` 没有 `--dir` 参数**（已用 `--help` 核实），升到 v2 会报
+`Unrecognized flag: --dir`，所有 opencode 会话直接崩。
+
+| 机器 | 必须的版本 |
+|---|---|
+| 全部 4 台 | **opencode-ai 1.19.x**（v1），**不要**装 `@opencode/cli`（v2）|
 
 ### 2.2 商汤组（7 个，全部机器一致）
 
@@ -81,9 +97,11 @@
 | 本机 / 936 / 961 | `custom:apihub.agnes-ai.com` | `agnes-3.0-flash`（实时拉取）|
 | 931 | 无 | — |
 
-## 3. 实测记录（2026-11-20 08:00）
+## 3. 实测记录（2026-11-20 08:20）
 
-统一用 `sensenova/deepseek-flash`（DeepSeek V4.1 Flash）提问 `3*5等于几？只回答数字`：
+### 3.1 DeepSeek 单问答
+
+统一用商汤 `deepseek-flash`（DeepSeek V4.1 Flash）提问 `3*5等于几？只回答数字`：
 
 | 机器 | gateway 模型 ID | 回答 | HTTP |
 |---|---|---|---|
@@ -91,6 +109,20 @@
 | 931 | `sensenova/sensenova/deepseek-flash` | **15** | 200 |
 | 936 | `商汤/sensenova/deepseek-flash` | **15** | 200 |
 | 961 | `sensenova/sensenova/deepseek-flash` | **15** | 200 |
+
+### 3.2 全量模型（7 项/台）
+
+商汤 `glm-5.3` / `kimi-k3` / `sensenova-6.8-flash` / `sensenova-6.8-flash-lite` / `u1.5-lite`(生图) / `u1.5-fast`(生图) + 腾讯 `deepseek-v4.1-flash`
+
+| 机器 | 通过 | 备注 |
+|---|---|---|
+| 本机 | **7/7** | |
+| 931 | **7/7** | `kimi-k3` 需重试（429 TPM/RPM），第 3 次成功 |
+| 936 | **7/7** | |
+| 961 | **7/7** | `6.8-flash-lite` 返回 200 但 content 空（思考令牌占满，加大 max_tokens 即可）|
+
+**生图**：gateway 不代理 `/v1/images/generations`，必须直连 `http://192.168.9.61:4010/v1/images/generations`。
+两个 u1.5 模型均输出 **2048×2048 PNG**。
 
 ## 4. 维护约定（**每次变更必须遵守**）
 
