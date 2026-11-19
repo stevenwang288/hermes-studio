@@ -9,9 +9,22 @@
 |---|---|---|
 | **本机 Windows 桌面版** | **黄金样本** | 所有变更先在这里验证 |
 | 931 | PVE 生产 | `/opt/hermes-studio-ekko` |
-| 935 | PVE 生产 | `/opt/hermes-studio` |
+| **935** | **已退出本项目** | 用户 2026-11-20 确认 935 不再承载 EKKO。内存仅 1.9G，`vite build` 必 OOM |
 | 936 | PVE 生产 | `/opt/hermes-studio-fork`（服务跑 ubuntu 用户）|
 | 961 | PVE + New API | `/opt/hermes-studio` + 4010/4013 网关 |
+
+> **同步范围 = 本机 + 931 + 936 + 961 四端**。935 不在范围内。
+
+### 0.1 provider 命名差异（已知，不要强行统一）
+
+| 终端 | provider 名 | gateway 模型 ID |
+|---|---|---|
+| 本机 / 935 / 936 / 961 | `custom:商汤` / `custom:腾讯` | `商汤/sensenova/<model>` |
+| 931 | `custom:sensenova` / `custom:tencent` | `sensenova/sensenova/<model>` |
+
+**实测：把 provider 名改成中文后，该 provider 会直接从 gateway 消失**（961 验证，只剩腾讯 31 个）。
+所以**只统一参数，不统一名字**。写测试脚本时按机器选前缀。
+
 
 ---
 

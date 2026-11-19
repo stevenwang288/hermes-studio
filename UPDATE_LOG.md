@@ -262,3 +262,44 @@ default_provider 键: 已删除
 
 ### 备注
 - 网络：本地翻墙 HTTP 代理 `127.0.0.1:10808`，git 已配全局代理。
+
+---
+
+## 2026-11-20 · 本地桌面版修复 + 三台 PVE 升级到 0.8.28
+
+### 本机（黄金样本）
+- **桌面版启动即退出的两个真因**：
+  1. `Start-Process` 启动 Electron 缺桌面会话上下文 → **必须用 `explorer.exe "<exe>"`**
+  2. `~/.hermes-web-ui/desktop-runtime/` **从未安装成功过**（0.20.6 在 10-28 就失败）
+     → 手工跑 `fetch:python/node/git/hermes` + `install:hermes` + `package:runtime` 补全
+- **修复 4 个脚本的 Windows tar 缺陷**：Git Bash GNU tar 把 `C:\` 当 host:path，
+  报 `Cannot connect to C: resolve failed`。改用 `%SystemRoot%\System32\tar.exe`。
+  影响 `fetch-python.mjs` / `fetch-node.mjs` / `fetch-git.mjs` / `package-runtime.mjs`。
+- 实测：claude-code 2.1.327 / opencode 2.2.5 / dsh 0.2.2-rc.1 三个 agent 全部 `1+2 → 3`。
+
+### 三台 PVE（931 / 936 / 961）
+| 机器 | 升级前 | 升级后 | 对话验证 |
+|---|---|---|---|
+| 931 | 0.8.28 (8e142dbe7) | **0.8.28 (2019e5fa7)** | socket `/chat-run` ✓ |
+| 936 | 0.8.19 | **0.8.28** | gateway `商汤/sensenova/deepseek-flash` → 200 |
+| 961 | 0.7.34 | **0.8.28** | gateway `sensenova/sensenova/deepseek-flash` → 200 |
+
+- **商汤 7 个模型参数统一为官方值**（931 原来是全 262144/65536 的偷懒配置）：
+  `deepseek-flash 1M/393216/vision` · `glm-5.3 1M/131072` · `kimi-k3 1M/131072/vision` ·
+  `6.8-flash 1M/131072/vision` · `6.8-flash-lite 262144/65536/vision` · `u1.5-lite/fast 262144/65536`
+- **936 清理 14 个垃圾 provider 模型**（`192.168.9.61:4010/*`、`token.sensenova.cn/*` 由 URL 当 provider 名产生），45 → 31 models
+- **936 认证修复**：服务跑 ubuntu（`HOME=/home/ubuntu`），JWT 必须用
+  `/home/ubuntu/.hermes-web-ui/.token`，不是 `/root/` 那份
+
+### 已知差异（不改，风险大于收益）
+| 机器 | provider 名 | gateway 模型 ID |
+|---|---|---|
+| 935 | `custom:商汤` / `custom:腾讯` | `商汤/sensenova/<m>` |
+| 931 | `custom:sensenova` / `custom:tencent` | `sensenova/sensenova/<m>` |
+| 936 / 961 | `custom:商汤` / `custom:腾讯` | `商汤/sensenova/<m>` |
+
+改名实测会让该 provider 直接从 gateway 消失（961 验证），故保留现状。
+
+### 遗留说明
+- **935 用户确认已不再承载 EKKO 项目**，本轮误升级（已升到 0.8.28 且能用，不影响其他服务）。
+  935 内存仅 1.9G 无 swap，`vite build` 会 OOM，产物从 931 交叉构建同步。
