@@ -159,7 +159,12 @@ if (curl.status !== 0) {
 
 console.log(`→ Extracting into ${extractionDir}`)
 // PBS tarballs unpack to a top-level "python/" directory; --strip-components=1 flattens it
-const tar = spawnSync('tar', ['-xzf', tarPath, '-C', extractionDir, '--strip-components=1'], { stdio: 'inherit' })
+// Git Bash's GNU tar misreads Windows absolute paths ("C:\..." looks like host:path) and
+// fails with "Cannot connect to C:". Prefer the OS-provided bsdtar on Windows.
+const tarBin = process.platform === 'win32'
+  ? `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\tar.exe`
+  : 'tar'
+const tar = spawnSync(tarBin, ['-xzf', tarPath, '-C', extractionDir, '--strip-components=1'], { stdio: 'inherit' })
 if (tar.status !== 0) {
   console.error('tar failed')
   process.exit(tar.status ?? 1)

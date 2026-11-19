@@ -19,8 +19,8 @@ export const AI_OUTPUT_FORMAT_GUIDELINES = `
 ## 路径规则
 
 - Unix/macOS/WSL：使用 \`/path/to/file\`，例如 \`/tmp/screenshot.png\`
-- Windows：使用盘符绝对路径，并把反斜杠 \`\\\` 转成正斜杠 \`/\`，例如 \`C:/Users/Administrator/Desktop/screenshot.png\`
-- Windows 路径必须用尖括号包住链接目标，避免盘符冒号或特殊字符被 Markdown 误解析，例如 \`<C:/Users/Administrator/Desktop/screenshot.png>\`
+- Windows：使用盘符绝对路径，并把反斜杠 \`\\\` 转成正斜杠 \`/\`，例如 \`C:/Users/user/Desktop/screenshot.png\`
+- Windows 路径必须用尖括号包住链接目标，避免盘符冒号或特殊字符被 Markdown 误解析，例如 \`<C:/Users/user/Desktop/screenshot.png>\`
 - 路径包含空格、中文或特殊字符时，必须使用尖括号包住链接目标，或对路径做 URL 编码
 - 确保文件确实存在且路径正确
 
@@ -31,7 +31,7 @@ export const AI_OUTPUT_FORMAT_GUIDELINES = `
 \`\`\`
 ![图片描述](/tmp/screenshot.png)
 ![Sub2API Dashboard](/tmp/sub2api-dashboard.png)
-![桌面截图](<C:/Users/Administrator/Desktop/screenshot.png>)
+![桌面截图](<C:/Users/user/Desktop/screenshot.png>)
 \`\`\`
 
 ## 视频格式
@@ -41,14 +41,14 @@ export const AI_OUTPUT_FORMAT_GUIDELINES = `
 \`\`\`
 [屏幕录制](/tmp/screen-recording.mp4)
 [操作演示](/tmp/demo.webm)
-[录屏2026-05-08 15.19.46](/Users/ekko/Desktop/录屏2026-05-08%2015.19.46.mov)
-[录屏2026-05-08 15.19.46](</Users/ekko/Desktop/录屏2026-05-08 15.19.46.mov>)
-[Windows 录屏](<C:/Users/Administrator/Desktop/screen recording.mov>)
+[录屏2026-05-08 15.19.46](/Users/user/Desktop/录屏2026-05-08%2015.19.46.mov)
+[录屏2026-05-08 15.19.46](</Users/user/Desktop/录屏2026-05-08 15.19.46.mov>)
+[Windows 录屏](<C:/Users/user/Desktop/screen recording.mov>)
 \`\`\`
 
 错误示例：
 \`\`\`
-[录屏2026-05-08 15.19.46](/Users/ekko/Desktop/录屏2026-05-08 15.19.46.mov)
+[录屏2026-05-08 15.19.46](/Users/user/Desktop/录屏2026-05-08 15.19.46.mov)
 ![桌面截图](C:\\Users\\Administrator\\Desktop\\screenshot.png)
 \`\`\`
 
@@ -58,7 +58,7 @@ export const AI_OUTPUT_FORMAT_GUIDELINES = `
 
 \`\`\`
 [下载报告](/tmp/monthly-report.pdf)
-[下载报告](<C:/Users/Administrator/Desktop/monthly-report.pdf>)
+[下载报告](<C:/Users/user/Desktop/monthly-report.pdf>)
 \`\`\`
 
 ## 发送文件给用户
@@ -67,11 +67,11 @@ export const AI_OUTPUT_FORMAT_GUIDELINES = `
 
 \`\`\`
 ![图片描述](/path/to/image.png)
-![Windows 图片](<C:/Users/Administrator/Desktop/image.png>)
+![Windows 图片](<C:/Users/user/Desktop/image.png>)
 [视频名](/path/to/video.mp4)
-[Windows 视频](<C:/Users/Administrator/Desktop/video.mp4>)
+[Windows 视频](<C:/Users/user/Desktop/video.mp4>)
 [文件名](/path/to/file.pdf)
-[Windows 文件](<C:/Users/Administrator/Desktop/file.pdf>)
+[Windows 文件](<C:/Users/user/Desktop/file.pdf>)
 \`\`\`
 `;
 
@@ -83,8 +83,8 @@ When your response includes an image, video, or file reference, use Markdown and
 ## Path rules
 
 - Unix/macOS/WSL: use \`/path/to/file\`, for example \`/tmp/screenshot.png\`
-- Windows: use an absolute drive-letter path and replace backslashes \`\\\` with forward slashes \`/\`, for example \`C:/Users/Administrator/Desktop/screenshot.png\`
-- Wrap Windows link targets in angle brackets so the drive-letter colon and special characters are parsed correctly, for example \`<C:/Users/Administrator/Desktop/screenshot.png>\`
+- Windows: use an absolute drive-letter path and replace backslashes \`\\\` with forward slashes \`/\`, for example \`C:/Users/user/Desktop/screenshot.png\`
+- Wrap Windows link targets in angle brackets so the drive-letter colon and special characters are parsed correctly, for example \`<C:/Users/user/Desktop/screenshot.png>\`
 - If a path contains spaces, Chinese characters, or other special characters, wrap the link target in angle brackets or URL-encode the path
 - Make sure the file exists and the path is correct
 
@@ -95,7 +95,7 @@ Use Markdown image syntax:
 \`\`\`
 ![Image description](/tmp/screenshot.png)
 ![Sub2API Dashboard](/tmp/sub2api-dashboard.png)
-![Desktop screenshot](<C:/Users/Administrator/Desktop/screenshot.png>)
+![Desktop screenshot](<C:/Users/user/Desktop/screenshot.png>)
 \`\`\`
 
 ## Video format
@@ -105,14 +105,14 @@ Use Markdown link syntax for video files. Supported formats are .mp4, .webm, and
 \`\`\`
 [Screen recording](/tmp/screen-recording.mp4)
 [Demo](/tmp/demo.webm)
-[Recording 2026-05-08 15.19.46](/Users/ekko/Desktop/recording%202026-05-08%2015.19.46.mov)
-[Recording 2026-05-08 15.19.46](</Users/ekko/Desktop/recording 2026-05-08 15.19.46.mov>)
-[Windows recording](<C:/Users/Administrator/Desktop/screen recording.mov>)
+[Recording 2026-05-08 15.19.46](/Users/user/Desktop/recording%202026-05-08%2015.19.46.mov)
+[Recording 2026-05-08 15.19.46](</Users/user/Desktop/recording 2026-05-08 15.19.46.mov>)
+[Windows recording](<C:/Users/user/Desktop/screen recording.mov>)
 \`\`\`
 
 Incorrect examples:
 \`\`\`
-[Recording 2026-05-08 15.19.46](/Users/ekko/Desktop/recording 2026-05-08 15.19.46.mov)
+[Recording 2026-05-08 15.19.46](/Users/user/Desktop/recording 2026-05-08 15.19.46.mov)
 ![Desktop screenshot](C:\\Users\\Administrator\\Desktop\\screenshot.png)
 \`\`\`
 
@@ -122,7 +122,7 @@ Use Markdown link syntax:
 
 \`\`\`
 [Download report](/tmp/monthly-report.pdf)
-[Download report](<C:/Users/Administrator/Desktop/monthly-report.pdf>)
+[Download report](<C:/Users/user/Desktop/monthly-report.pdf>)
 \`\`\`
 
 ## Sending a file to the user
@@ -131,13 +131,28 @@ When the user asks you to send, share, or deliver a file, return its path in one
 
 \`\`\`
 ![Image description](/path/to/image.png)
-![Windows image](<C:/Users/Administrator/Desktop/image.png>)
+![Windows image](<C:/Users/user/Desktop/image.png>)
 [Video name](/path/to/video.mp4)
-[Windows video](<C:/Users/Administrator/Desktop/video.mp4>)
+[Windows video](<C:/Users/user/Desktop/video.mp4>)
 [File name](/path/to/file.pdf)
-[Windows file](<C:/Users/Administrator/Desktop/file.pdf>)
+[Windows file](<C:/Users/user/Desktop/file.pdf>)
 \`\`\`
 `;
+
+/**
+ * Browser toolset guidance for the Ekko Studio MCP browser. Split into one rule
+ * per line so each constraint stays actionable; previously this was a single
+ * 700-word paragraph that models routinely collapsed into "click and hope".
+ */
+export const BROWSER_MCP_GUIDELINES = [
+  'When the user asks to use the Ekko Studio MCP browser (including 内置浏览器, MCP浏览器, Studio browser, or built-in browser) and ekko_studio_browser_toolset is available, prefer that toolset over Hermes native browser tools.',
+  'Hermes native browser tools use a different browser environment and do not share Studio tabs or login state. Use them only when explicitly requested or when the Studio browser is unavailable, and only the tools actually offered by the current runtime (browser_exec on newer Hermes releases). Never assume legacy browser tools exist.',
+  'For the Studio toolset, call it with action=list to discover operations, then action=describe for each schema you need, then action=call.',
+  'Browser MCP exposes a compact toolset rather than resources; an empty list_mcp_resources or list_mcp_resource_templates result does not mean the browser toolset is unavailable.',
+  'For large pages use local selector, query, and interactive_only filters plus nextOffset; these work without JEV.',
+  'After every action, inspect observation, selection/value states, changed text, and openedTabs. "Completed" means the action was dispatched, not that the goal was achieved.',
+  'If repeated actions show no relevant change, inspect a fresh region or take a screenshot and change strategy instead of repeating the same click.',
+];
 
 /**
  * Stable Ekko Studio MCP usage guidance. This intentionally avoids runtime
@@ -148,7 +163,6 @@ export const HERMES_MCP_USAGE_GUIDELINES = [
   'Ekko Studio MCP usage: when the user asks to read/check the operation manual, API docs, endpoint docs, 接口文档, 接口手册, or 操作手册, immediately call ekko_studio_api_openapi_get without filters to list API module outlines.',
   'Use the module purpose and keywords from ekko_studio_api_openapi_get to choose the right module, then call it again with a tag, path, or method filter before calling unfamiliar Web UI endpoints.',
   'Use ekko_studio_api_request with method, relative path, and JSON body/query fields that match the OpenAPI requestBody and parameters. Do not call full URLs.',
-  'When the user asks to use the Ekko Studio MCP browser (including 内置浏览器, MCP浏览器, Studio browser, or built-in browser) and ekko_studio_browser_toolset is available, prefer that toolset. Hermes native browser tools use a different browser environment and do not share Studio tabs or login state. Use that environment only when explicitly requested or Studio browser is unavailable, and use only the browser tools actually offered by the current runtime: browser_exec on newer Hermes releases. Never assume legacy browser tools exist. For the Studio toolset, call it with action=list to discover operations, action=describe for each needed schema, then action=call. Browser MCP exposes a compact toolset rather than resources; an empty list_mcp_resources or list_mcp_resource_templates result does not mean the browser toolset is unavailable. For large pages use local selector/query/interactive_only and nextOffset; these work without JEV. After actions inspect observation, selection/value states, changed text and openedTabs. Completed means dispatched, not that the goal was achieved. If repeated actions show no relevant change, inspect a fresh region or screenshot and change strategy instead of repeating the same click.',
   'Authentication and the configured Hermes profile are provided by the MCP server; do not add Authorization headers or copy tokens into tool arguments.',
   'Do not use ekko_studio_use_chat_run, Ekko Studio session tools, /api/studio/chat-run/*, or /api/studio/sessions/* as an internal delegation mechanism. In delegate_task, subtask, or workflow-node contexts, do not create, rename, delete, or continue Ekko Studio sessions unless the user explicitly asked to operate Ekko Studio sessions; return the delegated result in the current task instead.',
   'Ekko Studio session lookup: when the user provides a session id (for example a value like "muy...") or asks to read, inspect, or summarize a previous Studio conversation, use the ekko_studio_use_toolset MCP tool - call it with action=describe then action=call for ekko_studio_use_session_get or ekko_studio_use_session_messages, passing session_id (and profile when the id is not in the current profile). Read the transcript through that toolset instead of guessing local SQLite file paths or opening the Web UI in a browser, both of which fail silently behind the login wall.',
@@ -159,10 +173,10 @@ export function studioMcpUsageGuidelines(capabilities?: StudioMcpCapabilities): 
   const rules: string[] = []
   if (capabilities.api) rules.push(...HERMES_MCP_USAGE_GUIDELINES.slice(0, 3))
   if (capabilities.plugins) rules.push('Studio plugin tools are provided by the shared ekko-studio-plugins MCP server or a dedicated MCP server named by the plugin. Discover available tools and follow their descriptions and input schemas; tool names identify the plugin and operation, for example notebook__append.')
-  if (capabilities.browser) rules.push(HERMES_MCP_USAGE_GUIDELINES[3])
-  if (Object.values(capabilities).some(Boolean)) rules.push(HERMES_MCP_USAGE_GUIDELINES[4])
-  if (capabilities.api || capabilities.use) rules.push(HERMES_MCP_USAGE_GUIDELINES[5])
-  if (capabilities.use) rules.push(HERMES_MCP_USAGE_GUIDELINES[6])
+  if (capabilities.browser) rules.push(...BROWSER_MCP_GUIDELINES)
+  if (Object.values(capabilities).some(Boolean)) rules.push(HERMES_MCP_USAGE_GUIDELINES[3])
+  if (capabilities.api || capabilities.use) rules.push(HERMES_MCP_USAGE_GUIDELINES[4])
+  if (capabilities.use) rules.push(HERMES_MCP_USAGE_GUIDELINES[5])
   return rules.join('\n')
 }
 
@@ -172,6 +186,14 @@ You are executing one node in a workflow.
 Focus only on the current node task. Use upstream node results as context, but do not rerun upstream work. If upstream results conflict, call out the conflict and proceed with the best supported answer.
 
 Return the result for this node clearly and concisely. Do not describe the workflow mechanics unless the task asks for it.
+`;
+
+export const WORKFLOW_NODE_SYSTEM_CONTEXT_ZH = `
+你正在执行工作流中的一个节点。
+
+只聚焦当前节点的任务。把上游节点的结果当上下文使用，但不要重跑上游的活。如果上游结果互相冲突，先明确指出冲突，再按最有依据的答案继续。
+
+清晰简洁地返回本节点的结果。除非任务要求，不要描述工作流机制。
 `;
 
 /**
@@ -190,7 +212,9 @@ export function getSystemPrompt(
   }
 
   if (options?.source === 'workflow') {
-    parts.push(WORKFLOW_NODE_SYSTEM_CONTEXT.trim());
+    parts.push((options?.outputLanguage === 'en'
+      ? WORKFLOW_NODE_SYSTEM_CONTEXT
+      : WORKFLOW_NODE_SYSTEM_CONTEXT_ZH).trim());
   }
 
   const mcpGuidance = studioMcpUsageGuidelines(options?.mcpCapabilities);

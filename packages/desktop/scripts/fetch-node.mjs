@@ -51,9 +51,13 @@ if (curl.status !== 0) {
 console.log(`Extracting into ${OUT_DIR}`)
 let extract
 if (TARGET_OS === 'win32') {
-  extract = spawnSync('tar', ['-xf', archivePath, '-C', OUT_DIR, '--strip-components=1'], { stdio: 'inherit' })
+// Git Bash GNU tar misreads Windows absolute paths (C:\ => host:path). Use bsdtar.
+const tarBin = process.platform === 'win32'
+  ? `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\tar.exe`
+  : 'tar'
+  extract = spawnSync(tarBin, ['-xf', archivePath, '-C', OUT_DIR, '--strip-components=1'], { stdio: 'inherit' })
 } else {
-  extract = spawnSync('tar', ['-xzf', archivePath, '-C', OUT_DIR, '--strip-components=1'], { stdio: 'inherit' })
+  extract = spawnSync(tarBin, ['-xzf', archivePath, '-C', OUT_DIR, '--strip-components=1'], { stdio: 'inherit' })
 }
 if (extract.status !== 0) {
   console.error('extract failed')

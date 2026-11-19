@@ -205,7 +205,11 @@ try {
 
   const assetPath = resolve(OUT_DIR, assetName)
   rmSync(assetPath, { force: true })
-  run('tar', ['-czf', assetPath, '-C', stage, '.'])
+  // Git Bash GNU tar misreads Windows absolute paths (C:\ => host:path). Use bsdtar.
+  const tarBin = process.platform === 'win32'
+    ? `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\tar.exe`
+    : 'tar'
+  run(tarBin, ['-czf', assetPath, '-C', stage, '.'])
 
   const sha256 = await sha256File(assetPath)
   writeFileSync(`${assetPath}.sha256`, `${sha256}  ${assetName}\n`)
