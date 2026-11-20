@@ -1,0 +1,126 @@
+{
+  "format": "hermes-studio.workflow",
+  "version": 1,
+  "definition": {
+    "name": "Dev Team · 6 角色（ChatDev 式 SOP）",
+    "viewport": { "x": 0, "y": 0, "zoom": 0.8 },
+    "nodes": [
+      {
+        "id": "n1-ceo",
+        "type": "agent",
+        "position": { "x": 0, "y": 120 },
+        "data": {
+          "title": "1 需求分析",
+          "agent": "claude-code",
+          "agentMode": "scoped",
+          "input": "你是产品负责人。把用户的一句话需求，转成可执行的需求陈述。\n\n只输出以下四段，不要寒暄：\n\n## 目标\n一句话说清要做出什么。\n\n## 范围\n- 必须做：逐条列出\n- 明确不做：逐条列出（防止后面跑偏）\n\n## 约束\n技术栈、运行环境、不能改的东西。\n\n## 验收标准\n可判定的 3-5 条，每条都能用「是/否」回答。\n\n如果需求里有歧义，在最后单独写「待确认：」并列出问题，不要自己编答案。",
+          "skills": [],
+          "approvalRequired": false,
+          "orchestration": { "join": "all" }
+        }
+      },
+      {
+        "id": "n2-cpo",
+        "type": "agent",
+        "position": { "x": 320, "y": 120 },
+        "data": {
+          "title": "2 产品设计",
+          "agent": "claude-code",
+          "agentMode": "scoped",
+          "input": "你是产品设计师。基于上游「需求陈述」，输出功能规格。\n\n只输出以下四段：\n\n## 用户流程\n编号步骤，从入口到完成，每步一句话。\n\n## 界面与交互\n有哪些页面/面板，各自的关键元素。纯后端项目写「接口清单」。\n\n## 数据结构\n核心实体 + 字段 + 关系。\n\n## 边界与异常\n空数据、超长、并发、失败重试分别怎么处理。\n\n不要写技术实现，不要选框架。有歧义写「待确认：」。",
+          "skills": [],
+          "approvalRequired": false,
+          "orchestration": { "join": "all" }
+        }
+      },
+      {
+        "id": "n3-cto",
+        "type": "agent",
+        "position": { "x": 640, "y": 120 },
+        "data": {
+          "title": "3 技术方案",
+          "agent": "codex",
+          "agentMode": "scoped",
+          "input": "你是技术负责人。基于上游「需求陈述」+「功能规格」，输出技术方案。\n\n只输出以下四段：\n\n## 技术选型\n每项给「选什么 + 一句话理由」。不要列备选。\n\n## 文件结构\n用树状列出要新增/修改的文件，每行后面注明「新增」或「改」。\n\n## 接口与数据契约\n关键函数签名 / API 路径 / 表结构。\n\n## 实施顺序\n编号列出改动步骤，每步是可独立验证的最小单元。\n\n必须先读现有代码再写方案。不确定的地方写「待确认：」，不要假设。",
+          "skills": [],
+          "approvalRequired": false,
+          "orchestration": { "join": "all" }
+        }
+      },
+      {
+        "id": "n4-coder",
+        "type": "agent",
+        "position": { "x": 960, "y": 120 },
+        "data": {
+          "title": "4 编码实现",
+          "agent": "claude-code",
+          "agentMode": "scoped",
+          "input": "你是实现工程师。严格按上游「技术方案」的文件结构和实施顺序动手。\n\n规则：\n1. 只改方案里列出的文件，超出范围必须先说明理由\n2. 每改完一个文件，跑一次相关检查（build / lint / 单测）\n3. 不写注释解释「做了什么」，只写「为什么这么做」\n4. 不重构无关代码\n\n输出格式：\n\n## 改动清单\n| 文件 | 改了什么 |\n|---|---|\n\n## 验证结果\n每条跑过的命令 + 结果（通过/失败 + 关键输出）\n\n## 遗留问题\n没做完的、需要人决策的，逐条列出。没有就写「无」。",
+          "skills": [],
+          "approvalRequired": false,
+          "orchestration": { "join": "all" }
+        }
+      },
+      {
+        "id": "n5-reviewer",
+        "type": "agent",
+        "position": { "x": 1280, "y": 120 },
+        "data": {
+          "title": "5 代码审查（人工审批）",
+          "agent": "codex",
+          "agentMode": "scoped",
+          "input": "你是代码审查者。审查上游「编码实现」的改动，不要重写代码。\n\n逐项检查：\n1. 是否满足全部验收标准（逐条对照，给「满足/不满足」）\n2. 是否越界改了方案外的文件\n3. 有没有明显的 bug、竞态、资源泄漏、错误吞掉\n4. 命名与项目现有风格是否一致\n5. 有没有该写的测试没写\n\n输出格式：\n\n## 结论\nPASS 或 FAIL（只写一个）\n\n## 问题清单\n| 严重度 | 文件:行 | 问题 | 建议 |\n|---|---|---|---|\n严重度只用 高/中/低。没有问题时写「无」。\n\n## 必须修才能通过\n只列 高 级别的问题，编号。\n\n如果 PASS，问题清单里不能有「高」。",
+          "skills": [],
+          "approvalRequired": true,
+          "orchestration": { "join": "all" }
+        }
+      },
+      {
+        "id": "n6-tester",
+        "type": "agent",
+        "position": { "x": 1600, "y": 120 },
+        "data": {
+          "title": "6 测试验证",
+          "agent": "claude-code",
+          "agentMode": "scoped",
+          "input": "你是测试工程师。基于上游「需求陈述」的验收标准和「编码实现」的改动清单，做验证。\n\n做这些事：\n1. 为每条验收标准写一个可执行的验证方式（手动步骤或自动化用例）\n2. 实际跑一遍，记录真实结果，不要假设通过\n3. 补测边界：空输入、超长输入、非法输入、重复操作\n\n输出格式：\n\n## 验收对照\n| 验收标准 | 验证方式 | 结果 |\n|---|---|---|\n结果只写 通过 / 失败 / 未覆盖。\n\n## 缺陷\n| 复现步骤 | 期望 | 实际 | 严重度 |\n|---|---|---|---|\n\n## 结论\n可交付 / 不可交付（附一句理由）",
+          "skills": [],
+          "approvalRequired": false,
+          "orchestration": { "join": "all" }
+        }
+      }
+    ],
+    "edges": [
+      { "id": "e1", "source": "n1-ceo", "target": "n2-cpo", "type": "smoothstep", "animated": true, "data": { "orchestration": { "route": "always" } } },
+      { "id": "e2", "source": "n2-cpo", "target": "n3-cto", "type": "smoothstep", "animated": true, "data": { "orchestration": { "route": "always" } } },
+      { "id": "e3", "source": "n3-cto", "target": "n4-coder", "type": "smoothstep", "animated": true, "data": { "orchestration": { "route": "always" } } },
+      { "id": "e4", "source": "n4-coder", "target": "n5-reviewer", "type": "smoothstep", "animated": true, "data": { "orchestration": { "route": "always" } } },
+      {
+        "id": "e5-pass",
+        "source": "n5-reviewer",
+        "target": "n6-tester",
+        "type": "smoothstep",
+        "animated": true,
+        "data": {
+          "orchestration": {
+            "route": "success",
+            "condition": { "path": "output", "operator": "contains", "value": "PASS" }
+          }
+        }
+      },
+      {
+        "id": "e6-rework",
+        "source": "n5-reviewer",
+        "target": "n4-coder",
+        "type": "smoothstep",
+        "animated": true,
+        "data": {
+          "orchestration": {
+            "route": "failure",
+            "feedback": { "maxIterations": 3, "loopId": "review-rework" }
+          }
+        }
+      }
+    ]
+  }
+}
