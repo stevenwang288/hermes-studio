@@ -22,6 +22,8 @@ export interface WorkflowRunRecord {
   finished_at: number | null
   created_at: number
   error: string | null
+  failed_node_id: string | null
+  failed_node_error: string | null
   trigger_source: 'manual' | 'scheduled'
   scheduled_at: number | null
 }
@@ -126,6 +128,8 @@ function rowToRunRecord(row: Record<string, any>): WorkflowRunRecord {
     finished_at: row.finished_at == null ? null : Number(row.finished_at),
     created_at: Number(row.created_at || 0),
     error: row.error == null || row.error === '' ? null : String(row.error),
+    failed_node_id: row.failed_node_id == null || row.failed_node_id === '' ? null : String(row.failed_node_id),
+    failed_node_error: row.failed_node_error == null || row.failed_node_error === '' ? null : String(row.failed_node_error),
     trigger_source: row.trigger_source === 'scheduled' ? 'scheduled' : 'manual',
     scheduled_at: row.scheduled_at == null ? null : Number(row.scheduled_at),
   }
@@ -240,6 +244,8 @@ export function createWorkflowRun(input: {
   deadline_at?: number | null
   started_at?: number | null
   error?: string | null
+  failed_node_id?: string | null
+  failed_node_error?: string | null
   trigger_source?: 'manual' | 'scheduled'
   scheduled_at?: number | null
 }): WorkflowRunRecord {
@@ -261,6 +267,8 @@ export function createWorkflowRun(input: {
     finished_at: null,
     created_at: now,
     error: input.error || null,
+    failed_node_id: input.failed_node_id?.trim() || null,
+    failed_node_error: input.failed_node_error || null,
     trigger_source: input.trigger_source === 'scheduled' ? 'scheduled' : 'manual',
     scheduled_at: input.scheduled_at ?? null,
   }
@@ -281,6 +289,8 @@ export function createWorkflowRun(input: {
     finished_at: record.finished_at,
     created_at: record.created_at,
     error: record.error,
+    failed_node_id: record.failed_node_id,
+    failed_node_error: record.failed_node_error,
     trigger_source: record.trigger_source,
     scheduled_at: record.scheduled_at,
   }
@@ -293,8 +303,8 @@ export function createWorkflowRun(input: {
     INSERT INTO ${WORKFLOW_RUNS_TABLE} (
       id, workflow_id, profile, workspace, start_node_ids_json, status,
       snapshot_nodes_json, snapshot_edges_json, compiled_loops_json, requested_timeout_ms, deadline_at,
-      started_at, finished_at, created_at, error, trigger_source, scheduled_at, user_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      started_at, finished_at, created_at, error, failed_node_id, failed_node_error, trigger_source, scheduled_at, user_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     row.id,
     row.workflow_id,
@@ -311,6 +321,8 @@ export function createWorkflowRun(input: {
     row.finished_at,
     row.created_at,
     row.error,
+    row.failed_node_id,
+    row.failed_node_error,
     row.trigger_source,
     row.scheduled_at,
     row.user_id,
@@ -325,6 +337,8 @@ export function updateWorkflowRun(id: string, patch: {
   started_at?: number | null
   finished_at?: number | null
   error?: string | null
+  failed_node_id?: string | null
+  failed_node_error?: string | null
   allow_terminal_reset?: boolean
 }): WorkflowRunRecord | null {
   const existing = getWorkflowRun(id)
@@ -339,6 +353,8 @@ export function updateWorkflowRun(id: string, patch: {
     started_at: patch.started_at === undefined ? existing.started_at : patch.started_at,
     finished_at: patch.finished_at === undefined ? existing.finished_at : patch.finished_at,
     error: patch.error === undefined ? existing.error : patch.error,
+    failed_node_id: patch.failed_node_id === undefined ? existing.failed_node_id : patch.failed_node_id,
+    failed_node_error: patch.failed_node_error === undefined ? existing.failed_node_error : patch.failed_node_error,
   }
   const db = getDb()
   if (!db) {
@@ -353,9 +369,9 @@ export function updateWorkflowRun(id: string, patch: {
   }
   db.prepare(`
     UPDATE ${WORKFLOW_RUNS_TABLE}
-    SET status = ?, requested_timeout_ms = ?, deadline_at = ?, started_at = ?, finished_at = ?, error = ?
+    SET status = ?, requested_timeout_ms = ?, deadline_at = ?, started_at = ?, finished_at = ?, error = ?, failed_node_id = ?, failed_node_error = ?
     WHERE id = ?
-  `).run(next.status, next.requested_timeout_ms, next.deadline_at, next.started_at, next.finished_at, next.error, id)
+  `).run(next.status, next.requested_timeout_ms, next.deadline_at, next.started_at, next.finished_at, next.error, next.failed_node_id, next.failed_node_error, id)
   return next
 }
 

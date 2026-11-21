@@ -8,6 +8,7 @@ import { cancelWorkflowImport, consumeWorkflowImportPreview, exportWorkflowDefin
 import { assertWorkflowImportCapabilities } from '../services/workflow/import-capabilities'
 import { getWorkflowAvailableModelGroups } from '../public/workflow-runtime'
 import { assertWorkflowScheduleCron, nextWorkflowScheduleAt, normalizeWorkflowSchedule } from '../services/workflow/schedule'
+import { filterWorkflowsByName } from '../services/workflow/search'
 
 const MAX_BATCH_DELETE = 200
 
@@ -264,7 +265,8 @@ export async function confirmImport(ctx: Context) {
 export async function list(ctx: Context) {
   const profile = explicitListProfile(ctx)
   if (profile && denyProfileAccess(ctx, profile)) return
-  const workflows = filterByAllowedProfiles(ctx, getWorkflowManager().list(profile))
+  const q = firstQueryValue(ctx.query.q as string | string[] | undefined)
+  const workflows = filterWorkflowsByName(filterByAllowedProfiles(ctx, getWorkflowManager().list(profile)), q)
   ctx.body = { workflows }
 }
 

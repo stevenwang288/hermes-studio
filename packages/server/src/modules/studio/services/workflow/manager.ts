@@ -1837,7 +1837,7 @@ export class WorkflowManager extends EventEmitter<WorkflowManagerEvents> {
       const finishedAt = Date.now()
       if (firstNodeFailure.value) {
         const message = firstNodeFailure.value.error
-        const failedRun = updateWorkflowRun(run.id, { status: 'failed', finished_at: finishedAt, error: message }) || run
+        const failedRun = updateWorkflowRun(run.id, { status: 'failed', finished_at: finishedAt, error: message, failed_node_id: firstNodeFailure.value.node.id, failed_node_error: message }) || run
         this.setRuntimeStatus(workflowId, { status: 'failed', runId: run.id, completedAt: finishedAt, error: message, nodeStatuses: { ...nodeStatuses } })
         return { run: failedRun, nodeSessions: listWorkflowRunNodeSessions(run.id) }
       }
@@ -1949,7 +1949,7 @@ export class WorkflowManager extends EventEmitter<WorkflowManagerEvents> {
     const inFlight = new Map<string, Promise<any>>()
     let firstNodeFailure: { node: WorkflowNodeSnapshot; error: string } | null = null
 
-    const failRun = (message: string) => {
+    const failRun = (message: string, failedNode?: { id: string; error: string }) => {
       if (this.canceledRunIds.has(run.id) || getWorkflowRun(run.id)?.status === 'canceled') {
         const finishedAt = Date.now()
         for (const node of activeNodes) {
@@ -1966,7 +1966,7 @@ export class WorkflowManager extends EventEmitter<WorkflowManagerEvents> {
         return canceled
       }
       const finishedAt = Date.now()
-      const failed = updateWorkflowRun(run.id, { status: 'failed', finished_at: finishedAt, error: message }) || run
+      const failed = updateWorkflowRun(run.id, { status: 'failed', finished_at: finishedAt, error: message, failed_node_id: failedNode?.id ?? null, failed_node_error: failedNode?.error ?? null }) || run
       this.setRuntimeStatus(workflowId, {
         status: 'failed',
         runId: run.id,
@@ -2206,17 +2206,18 @@ export class WorkflowManager extends EventEmitter<WorkflowManagerEvents> {
             return { run: canceledRun, nodeSessions: listWorkflowRunNodeSessions(run.id) }
           }
           if ('deadlineExceeded' in failed && failed.deadlineExceeded) {
-            const failedRun = failRun(failed.error || runTimeoutMessage || 'workflow run timed out')
+            const timeoutError = failed.error || runTimeoutMessage || 'workflow run timed out'
+            const failedRun = failRun(timeoutError, { id: failed.node.id, error: timeoutError })
             return { run: failedRun, nodeSessions: listWorkflowRunNodeSessions(run.id) }
           }
           if ('approvalRejected' in failed && failed.approvalRejected) {
             const message = `Node ${failed.node.data.title || failed.node.id} approval rejected`
-            const failedRun = failRun(message)
+            const failedRun = failRun(message, { id: failed.node.id, error: failed.error })
             return { run: failedRun, nodeSessions: listWorkflowRunNodeSessions(run.id) }
           }
           nodeStatuses[failed.node.id] = 'failed'
           const message = `Node ${failed.node.data.title || failed.node.id} failed: ${failed.error}`
-          const failedRun = failRun(message)
+          const failedRun = failRun(message, { id: failed.node.id, error: failed.error })
           return { run: failedRun, nodeSessions: listWorkflowRunNodeSessions(run.id) }
         }
       }
@@ -2224,7 +2225,7 @@ export class WorkflowManager extends EventEmitter<WorkflowManagerEvents> {
       if (firstNodeFailure) {
         const failure = firstNodeFailure as { node: WorkflowNodeSnapshot; error: string }
         const message = `Node ${failure.node.data.title || failure.node.id} failed: ${failure.error}`
-        const failedRun = failRun(message)
+        const failedRun = failRun(message, { id: failure.node.id, error: failure.error })
         return { run: failedRun, nodeSessions: listWorkflowRunNodeSessions(run.id) }
       }
       const finishedAt = Date.now()

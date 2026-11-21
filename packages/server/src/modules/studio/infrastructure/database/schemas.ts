@@ -439,6 +439,8 @@ export const WORKFLOW_RUNS_SCHEMA: Record<string, string> = {
   finished_at: 'INTEGER',
   created_at: 'INTEGER NOT NULL',
   error: 'TEXT',
+  failed_node_id: 'TEXT',
+  failed_node_error: 'TEXT',
   trigger_source: "TEXT NOT NULL DEFAULT 'manual'",
   scheduled_at: 'INTEGER',
 }
