@@ -77,3 +77,6 @@ NUL
 sql-data/
 dist.backup/
 dist.bak*/
+.installers/
+packages/desktop/release/
+packages/desktop/release-*/
