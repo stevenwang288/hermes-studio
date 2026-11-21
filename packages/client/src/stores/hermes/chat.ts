@@ -7,6 +7,7 @@ import { isKnownEkkoSessionCommand } from '@/utils/hermes/bridge-session-command
 import { normalizeRunUsage, type RunUsageSummary } from '@/utils/run-usage'
 import { mergeTaskPlanMessages, type TaskPlanSnapshot } from '@/utils/task-plan'
 import { applyPersonTimelinePage, applyPersonFlowUpdate, preservePersonTimelineWindow } from '@/utils/person-timeline'
+import type { PendingInboxEvent } from '@/api/studio/pending-inbox'
 import { startRunViaSocket, onUnobservedRunStarted, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, respondToolApproval, onPeerUserMessage, onPersonUpdated, onSessionCommand, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, onRunUsageUpdated, respondClarify, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
 import { archiveSession as archiveSessionApi, deleteSession as deleteSessionApi, fetchSessionMessagesPage, fetchSessions, fetchWorkspaceRunChangeFile, setSessionModel, setSessionPushEnabled as persistSessionPushEnabled, setSessionReasoningEffort as persistSessionReasoningEffort, type HermesMessage, type SessionSummary, type WorkspaceRunChangeFileDetail, type WorkspaceRunChangeSummary } from '@/api/studio/sessions'
 import { getActiveProfileName } from '@/api/client'
@@ -420,6 +421,8 @@ export function formatMessageWithReference(reference: MessageReference, content:
 
 export interface PendingApproval {
   sessionId: string
+  inboxProfile?: string
+  sessionSource?: string
   approvalId: string
   command: string
   description: string
@@ -434,6 +437,8 @@ export interface PendingApproval {
 
 export interface PendingClarify {
   sessionId: string
+  inboxProfile?: string
+  sessionSource?: string
   clarifyId: string
   question: string
   choices: string[] | null
@@ -1603,8 +1608,8 @@ function createChatState(scopedSessionId?: string) {
     queuedUserMessages.value = new Map()
     pendingUserMessageIds.clear()
     queueInsertionStates.value = new Map()
-    pendingApprovals.value = new Map([...pendingApprovals.value].filter(([id]) => id.startsWith('person-main-')))
-    pendingClarifies.value = new Map([...pendingClarifies.value].filter(([id]) => id.startsWith('person-main-')))
+    pendingApprovals.value = new Map([...pendingApprovals.value].filter(([id, request]) => request.inboxProfile || id.startsWith('person-main-')))
+    pendingClarifies.value = new Map([...pendingClarifies.value].filter(([id, request]) => request.inboxProfile || id.startsWith('person-main-')))
     pendingApprovalResponseIds.clear()
     pendingClarifyResponseIds.clear()
     streamStates.value = new Map()
@@ -3574,7 +3579,7 @@ function promoteQueuedMessage(sessionId: string, messageId: string) {
     })
   }
 
-  function setPendingApproval(evt: RunEvent) {
+  function setPendingApproval(evt: RunEvent, inboxProfile?: string) {
     const sid = evt.session_id
     const approvalId = (evt as any).approval_id as string | undefined
     if (!sid || !approvalId) return
@@ -3595,6 +3600,8 @@ function promoteQueuedMessage(sessionId: string, messageId: string) {
     pendingApprovals.value.set(sid, {
       sessionId: sid,
       approvalId,
+      inboxProfile: inboxProfile ?? sameRequest?.inboxProfile,
+      sessionSource: evt.session_source ?? sameRequest?.sessionSource,
       submitting: sameRequest?.submitting,
       submissionFailed: sameRequest?.submissionFailed,
       command: String((evt as any).command || ''),
@@ -3636,7 +3643,7 @@ function promoteQueuedMessage(sessionId: string, messageId: string) {
     pendingApprovals.value = new Map(pendingApprovals.value)
   }
 
-  function setPendingClarify(evt: RunEvent) {
+  function setPendingClarify(evt: RunEvent, inboxProfile?: string) {
     const sid = evt.session_id
     const clarifyId = (evt as any).clarify_id as string | undefined
     if (!sid || !clarifyId) return
@@ -3646,6 +3653,8 @@ function promoteQueuedMessage(sessionId: string, messageId: string) {
     pendingClarifies.value.set(sid, {
       sessionId: sid,
       clarifyId,
+      inboxProfile: inboxProfile ?? sameQuestion?.inboxProfile,
+      sessionSource: evt.session_source ?? sameQuestion?.sessionSource,
       question: String((evt as any).question || ''),
       choices: Array.isArray((evt as any).choices) ? (evt as any).choices : null,
       initialResponse: sameQuestion?.initialResponse ?? String((evt as any).initial_response || ''),
@@ -3692,6 +3701,25 @@ function promoteQueuedMessage(sessionId: string, messageId: string) {
     pendingClarifies.value = new Map(pendingClarifies.value)
   }
 
+  function applyPendingInboxEvent(event: PendingInboxEvent) {
+    if (event.event === 'approval.requested') setPendingApproval(event, event.profile)
+    if (event.event === 'clarify.requested') setPendingClarify(event, event.profile)
+    if (event.event === 'approval.resolved') clearPendingApproval(event)
+    if (event.event === 'clarify.resolved') clearPendingClarify(event)
+  }
+
+  function restorePendingInbox(events: PendingInboxEvent[]) {
+    const approvals = new Map(events.filter(e => e.approval_id).map(e => [e.session_id, e.approval_id]))
+    const clarifications = new Map(events.filter(e => e.clarify_id).map(e => [e.session_id, e.clarify_id]))
+    for (const [sid, pending] of pendingApprovals.value) {
+      if (pending.inboxProfile && approvals.get(sid) !== pending.approvalId) dismissPendingApprovalFor(sid, pending.approvalId)
+    }
+    for (const [sid, pending] of pendingClarifies.value) {
+      if (pending.inboxProfile && clarifications.get(sid) !== pending.clarifyId) dismissPendingClarifyFor(sid, pending.clarifyId)
+    }
+    for (const event of events) applyPendingInboxEvent(event)
+  }
+
   function clearPendingInteractions(sessionId: string) {
     pendingApprovalResponseIds.delete(sessionId)
     pendingClarifyResponseIds.delete(sessionId)
@@ -3724,6 +3752,14 @@ function promoteQueuedMessage(sessionId: string, messageId: string) {
     pendingClarifies.value = new Map(pendingClarifies.value)
   }
 
+  function pendingResponseRoute(pending: PendingApproval | PendingClarify) {
+    const session = sessions.value.find(item => item.id === pending.sessionId)
+    const person = pending.sessionId.startsWith('person-main-')
+    const local = !!pending.inboxProfile || person
+    const profile = person && pending.inboxProfile ? getProfileName() : pending.inboxProfile || session?.profile
+    return { transport: local ? 'chat-run' as const : runtimeTransport(), profile }
+  }
+
   async function respondToClarifyFor(sessionId: string, clarifyId: string, response: string): Promise<PendingInteractionSubmitResult> {
     const pending = pendingClarifies.value.get(sessionId)
     if (!pending || pending.clarifyId !== clarifyId || pending.submitting) return 'missing'
@@ -3732,8 +3768,8 @@ function promoteQueuedMessage(sessionId: string, messageId: string) {
     pending.initialResponse = response
     pendingClarifyResponseIds.set(sessionId, clarifyId)
     try {
-      const session = sessions.value.find(item => item.id === sessionId)
-      await respondClarify(sessionId, clarifyId, response, sessionId.startsWith('person-main-') ? 'chat-run' : runtimeTransport(), session?.profile)
+      const { transport, profile } = pendingResponseRoute(pending)
+      await respondClarify(sessionId, clarifyId, response, transport, profile)
       dismissPendingClarifyFor(sessionId, clarifyId)
       return 'submitted'
     } catch (error) {
@@ -3768,8 +3804,8 @@ function promoteQueuedMessage(sessionId: string, messageId: string) {
     pending.submissionFailed = false
     pendingApprovalResponseIds.set(sessionId, approvalId)
     try {
-      const session = sessions.value.find(item => item.id === sessionId)
-      await respondToolApproval(sessionId, approvalId, choice, sessionId.startsWith('person-main-') ? 'chat-run' : runtimeTransport(), session?.profile)
+      const { transport, profile } = pendingResponseRoute(pending)
+      await respondToolApproval(sessionId, approvalId, choice, transport, profile)
       dismissPendingApprovalFor(sessionId, approvalId)
       return 'submitted'
     } catch (error) {
@@ -5990,6 +6026,8 @@ function promoteQueuedMessage(sessionId: string, messageId: string) {
         scrollToBottomCounter,
     activeMessageReference,
     pendingApprovals,
+    applyPendingInboxEvent,
+    restorePendingInbox,
     activePendingApproval,
     pendingClarifies,
     activePendingClarify,
